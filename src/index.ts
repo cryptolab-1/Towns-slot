@@ -107,6 +107,7 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
 })
 
 bot.onSlashCommand('help', async (handler, { channelId }) => {
+    console.log('Help command received')
     await handler.sendMessage(
         channelId,
         '**Available Commands:**\n\n' +
@@ -119,9 +120,11 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
             '• Say "ping" - I\'ll show latency\n' +
             '• Say "react" - I\'ll add a reaction\n',
     )
+    console.log('Help command response sent')
 })
 
 bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
+    console.log('Slot command received from user:', userId)
     const jackpotEth = Number(jackpot) / 1e18
     await handler.sendMessage(
         channelId,
@@ -138,6 +141,7 @@ bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
             '• No match = 0%\n\n' +
             'Good luck! 🍀',
     )
+    console.log('Slot command response sent')
 })
 
 bot.onMessage(async (handler, { message, channelId, eventId, createdAt }) => {
@@ -249,15 +253,26 @@ const { jwtMiddleware, handler } = bot.start()
 
 const app = new Hono()
 app.use(logger())
+
+// Health check endpoint
+app.get('/health', async (c) => {
+    return c.json({ status: 'ok', timestamp: new Date().toISOString() })
+})
+
+// Webhook endpoint for Towns events
 app.post('/webhook', jwtMiddleware, handler)
+
+// Agent metadata endpoint
 app.get('/.well-known/agent-metadata.json', async (c) => {
     try {
+        console.log('Fetching agent metadata...')
         // Add timeout to prevent hanging requests
         const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Metadata request timeout')), 30000), // 30 second timeout
         )
         const metadataPromise = bot.getIdentityMetadata()
         const metadata = await Promise.race([metadataPromise, timeoutPromise])
+        console.log('Agent metadata fetched successfully')
         return c.json(metadata)
     } catch (error) {
         console.error('Error fetching agent metadata:', error)
@@ -272,4 +287,15 @@ app.get('/.well-known/agent-metadata.json', async (c) => {
     }
 })
 
-export default app
+// Log startup
+const port = process.env.PORT || 5123
+console.log(`🚀 Towns bot server starting on port ${port}`)
+console.log(`📡 Webhook endpoint: http://localhost:${port}/webhook`)
+console.log(`🏥 Health check: http://localhost:${port}/health`)
+console.log(`✅ Bot initialized with appAddress: ${bot.appAddress}`)
+
+// For Bun/Render compatibility
+export default {
+    port: Number(port),
+    fetch: app.fetch,
+}
