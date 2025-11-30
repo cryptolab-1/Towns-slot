@@ -94,7 +94,15 @@ function formatSlotResult(
     return result
 }
 
-const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA!, process.env.JWT_SECRET!, {
+// Validate required environment variables
+if (!process.env.APP_PRIVATE_DATA) {
+    throw new Error('APP_PRIVATE_DATA environment variable is required but not set')
+}
+if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET environment variable is required but not set')
+}
+
+const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SECRET, {
     commands,
 })
 
