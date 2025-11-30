@@ -6,8 +6,8 @@ import commands from './commands'
 // Slot machine symbols
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '🎰'] as const
 
-// Entry fee: $0.10 = 0.0001 ETH = 100000000000000 Wei (assuming ETH ~$1000)
-const ENTRY_FEE_WEI = BigInt('100000000000000') // 0.0001 ETH
+// Entry fee: $0.25 = 0.00025 ETH = 250000000000000 Wei (assuming ETH ~$1000)
+const ENTRY_FEE_WEI = BigInt('250000000000000') // 0.00025 ETH
 
 // Deployer wallet address (receives 10% fee on payouts)
 const DEPLOYER_ADDRESS = process.env.DEPLOYER_ADDRESS as `0x${string}`
@@ -73,11 +73,14 @@ function formatSlotResult(
     jackpotAmount: bigint,
     winnerPayout: bigint,
     hasFee: boolean,
+    gameNumber?: number,
+    totalGames?: number,
 ): string {
     const [a, b, c] = symbols
     const jackpotEth = Number(jackpotAmount) / 1e18
+    const gameHeader = totalGames && totalGames > 1 ? `🎰 **GAME ${gameNumber}/${totalGames}** 🎰\n\n` : `🎰 **SLOT MACHINE** 🎰\n\n`
     const result =
-        `🎰 **SLOT MACHINE** 🎰\n\n` +
+        gameHeader +
         `[ ${a} | ${b} | ${c} ]\n\n` +
         `${winnings.message}\n\n` +
         `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n\n`
@@ -92,6 +95,23 @@ function formatSlotResult(
     }
 
     return result
+}
+
+function formatMultiGameSummary(
+    totalWinnings: bigint,
+    totalPayout: bigint,
+    hasFee: boolean,
+    numGames: number,
+): string {
+    const totalWinningsEth = Number(totalWinnings) / 1e18
+    const totalPayoutEth = Number(totalPayout) / 1e18
+    let summary = `\n\n🎉 **TOTAL RESULTS (${numGames} games):**\n\n`
+    summary += `💰 **Total Winnings:** ${totalWinningsEth.toFixed(6)} ETH\n`
+    summary += `💵 **Total Payout:** ${totalPayoutEth.toFixed(6)} ETH`
+    if (hasFee) {
+        summary += `\n📝 *10% fee deducted from each win*`
+    }
+    return summary
 }
 
 // Validate required environment variables
@@ -126,13 +146,15 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
 bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     console.log('Slot command received from user:', userId)
     const jackpotEth = Number(jackpot) / 1e18
+    const entryFeeEth = Number(ENTRY_FEE_WEI) / 1e18
     await handler.sendMessage(
         channelId,
         '🎰 **Welcome to the Slot Machine!** 🎰\n\n' +
-            'To play, send me a tip of **$0.10 (0.0001 ETH)**\n\n' +
+            `To play, send me a tip of **$${entryFeeEth * 1000} (${entryFeeEth} ETH)** per game\n\n` +
             '**How to play:**\n' +
-            '1. Tip me 0.0001 ETH\n' +
-            '2. I\'ll spin the reels for you!\n\n' +
+            `1. Tip me ${entryFeeEth} ETH for 1 game\n` +
+            `2. Tip me more to play multiple games! (e.g., ${(entryFeeEth * 4).toFixed(4)} ETH = 4 games)\n` +
+            '3. I\'ll spin the reels for you!\n\n' +
             `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n\n` +
             '**Payouts (percentage of jackpot):**\n' +
             '• Three 💎 = 100% (JACKPOT!)\n' +
@@ -172,71 +194,110 @@ bot.onTip(async (handler, event) => {
         return
     }
 
-    // Check if tip amount matches entry fee
-    if (event.amount !== ENTRY_FEE_WEI) {
+    // Check if tip amount is a multiple of entry fee
+    if (event.amount < ENTRY_FEE_WEI || event.amount % ENTRY_FEE_WEI !== BigInt(0)) {
         const receivedEth = Number(event.amount) / 1e18
         const requiredEth = Number(ENTRY_FEE_WEI) / 1e18
         await handler.sendMessage(
             event.channelId,
             `❌ Invalid tip amount!\n\n` +
                 `You sent: ${receivedEth.toFixed(6)} ETH\n` +
-                `Required: ${requiredEth.toFixed(6)} ETH (0.0001 ETH = $0.10)\n\n` +
-                `Please send exactly 0.0001 ETH to play the slot machine! 🎰`,
+                `Required: ${requiredEth.toFixed(6)} ETH per game ($${(requiredEth * 1000).toFixed(2)})\n\n` +
+                `Tip must be a multiple of ${requiredEth.toFixed(6)} ETH to play! 🎰\n` +
+                `Examples: ${requiredEth.toFixed(6)} ETH (1 game), ${(requiredEth * 4).toFixed(6)} ETH (4 games)`,
         )
         return
     }
 
-    // Add entry fee to jackpot
+    // Calculate number of games
+    const numGames = Number(event.amount / ENTRY_FEE_WEI)
+    const entryFeeEth = Number(ENTRY_FEE_WEI) / 1e18
+
+    // Add all entry fees to jackpot
     jackpot += event.amount
 
-    // Spin the slot machine!
-    const symbols = spinSlotMachine()
-    const winnings = calculateWinnings(symbols)
+    // Track total winnings and payouts across all games
+    let totalWinnings = BigInt(0)
+    let totalPayout = BigInt(0)
+    const gameResults: string[] = []
 
-    // Calculate payout based on jackpot percentage
-    let payoutAmount = BigInt(0)
-    let winnerPayout = BigInt(0)
-    let hasFee = false
+    // Play multiple games
+    for (let gameNum = 1; gameNum <= numGames; gameNum++) {
+        // Spin the slot machine!
+        const symbols = spinSlotMachine()
+        const winnings = calculateWinnings(symbols)
 
-    if (winnings.percentage > 0) {
-        // Calculate percentage of jackpot
-        const percentageMultiplier = BigInt(winnings.percentage)
-        payoutAmount = (jackpot * percentageMultiplier) / BigInt(100)
+        // Calculate payout based on jackpot percentage
+        let payoutAmount = BigInt(0)
+        let winnerPayout = BigInt(0)
+        let hasFee = false
 
-        // Calculate fee (10% of payout goes to deployer, if deployer address is set)
-        let feeAmount = BigInt(0)
-        winnerPayout = payoutAmount
+        if (winnings.percentage > 0) {
+            // Calculate percentage of jackpot
+            const percentageMultiplier = BigInt(winnings.percentage)
+            payoutAmount = (jackpot * percentageMultiplier) / BigInt(100)
 
-        if (DEPLOYER_ADDRESS) {
-            feeAmount = (payoutAmount * BigInt(FEE_PERCENTAGE)) / BigInt(100)
-            winnerPayout = payoutAmount - feeAmount
-            hasFee = true
+            // Calculate fee (10% of payout goes to deployer, if deployer address is set)
+            let feeAmount = BigInt(0)
+            winnerPayout = payoutAmount
+
+            if (DEPLOYER_ADDRESS) {
+                feeAmount = (payoutAmount * BigInt(FEE_PERCENTAGE)) / BigInt(100)
+                winnerPayout = payoutAmount - feeAmount
+                hasFee = true
+            }
+
+            // Update jackpot (subtract full payout amount)
+            jackpot -= payoutAmount
+
+            // Accumulate totals
+            totalWinnings += payoutAmount
+            totalPayout += winnerPayout
+
+            // Store fee amount for deployer (we'll send all fees at once at the end)
         }
 
-        // Update jackpot (subtract full payout amount)
-        jackpot -= payoutAmount
+        // Format and store result for this game
+        const result = formatSlotResult(symbols, winnings, jackpot, winnerPayout, hasFee, gameNum, numGames)
+        gameResults.push(result)
+    }
 
-        // Send payout to winner
+    // Send all game results
+    for (const result of gameResults) {
+        await handler.sendMessage(event.channelId, result)
+    }
+
+    // Send total summary if multiple games
+    if (numGames > 1) {
+        const summary = formatMultiGameSummary(totalWinnings, totalPayout, !!DEPLOYER_ADDRESS, numGames)
+        await handler.sendMessage(event.channelId, summary)
+    }
+
+    // Send total payout to winner (if any winnings)
+    if (totalPayout > 0) {
         try {
             await handler.sendTip({
                 userId: event.senderAddress,
-                amount: winnerPayout,
+                amount: totalPayout,
                 messageId: event.messageId,
                 channelId: event.channelId,
             })
 
-            // Send fee to deployer (10%)
-            if (DEPLOYER_ADDRESS && feeAmount > 0) {
-                await handler.sendTip({
-                    userId: DEPLOYER_ADDRESS,
-                    amount: feeAmount,
-                    messageId: event.messageId,
-                    channelId: event.channelId,
-                })
+            // Send total fee to deployer (10% of total winnings)
+            if (DEPLOYER_ADDRESS && totalWinnings > 0) {
+                const totalFee = totalWinnings - totalPayout
+                if (totalFee > 0) {
+                    await handler.sendTip({
+                        userId: DEPLOYER_ADDRESS,
+                        amount: totalFee,
+                        messageId: event.messageId,
+                        channelId: event.channelId,
+                    })
+                }
             }
         } catch (error) {
-            // If payout fails, add the amount back to jackpot
-            jackpot += payoutAmount
+            // If payout fails, add the amounts back to jackpot
+            jackpot += totalWinnings
             await handler.sendMessage(
                 event.channelId,
                 `⚠️ Sorry, I couldn't send your payout. Please contact the bot administrator.`,
@@ -244,10 +305,6 @@ bot.onTip(async (handler, event) => {
             return
         }
     }
-
-    // Format and send result
-    const result = formatSlotResult(symbols, winnings, jackpot, winnerPayout, hasFee)
-    await handler.sendMessage(event.channelId, result)
 })
 const { jwtMiddleware, handler } = bot.start()
 
