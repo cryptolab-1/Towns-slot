@@ -251,7 +251,25 @@ const app = new Hono()
 app.use(logger())
 app.post('/webhook', jwtMiddleware, handler)
 app.get('/.well-known/agent-metadata.json', async (c) => {
-    return c.json(await bot.getIdentityMetadata())
+    try {
+        // Add timeout to prevent hanging requests
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Metadata request timeout')), 30000), // 30 second timeout
+        )
+        const metadataPromise = bot.getIdentityMetadata()
+        const metadata = await Promise.race([metadataPromise, timeoutPromise])
+        return c.json(metadata)
+    } catch (error) {
+        console.error('Error fetching agent metadata:', error)
+        // Return a basic response if metadata fetch fails
+        return c.json(
+            {
+                error: 'Failed to fetch metadata',
+                message: error instanceof Error ? error.message : 'Unknown error',
+            },
+            503,
+        )
+    }
 })
 
 export default app
