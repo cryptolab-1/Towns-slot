@@ -216,6 +216,10 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
     commands,
 })
 
+// Map to store user message IDs for tip payouts
+// Key: userId, Value: messageId (must be a message authored by the user)
+const slotGameMap = new Map<string, string>()
+
 // Helper function to send tip using handler.sendTip() (per Towns Protocol docs)
 async function sendTipWithRetry(
     handler: any,
@@ -310,8 +314,13 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
     console.log('Help command response sent')
 })
 
-bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
+bot.onSlashCommand('slot', async (handler, { channelId, userId, eventId }) => {
     console.log('Slot command received from user:', userId)
+    
+    // Store the user's eventId for later use in tip payouts
+    // This eventId represents a user-authored event (the slash command)
+    slotGameMap.set(userId, eventId)
+    console.log(`Stored messageId ${eventId} for user ${userId}`)
     
     // Get jackpot from actual wallet balance (bot.appAddress)
     const jackpot = await getBalance(bot.viem, { address: bot.appAddress })
@@ -527,18 +536,20 @@ bot.onTip(async (handler, event) => {
     if (totalPayout > 0) {
         const payoutEth = (Number(totalPayout) / 1e18).toFixed(6)
         
-        // Send a message first, then tip on that message
-        // This ensures we have a valid messageId to tip on
-        const { eventId: payoutMessageId } = await handler.sendMessage(
-            event.channelId,
-            `🎉 **You won ${payoutEth} ETH!**\n\n` +
-                `💰 **Sending your winnings now...**`,
-        )
+        // Get the user's messageId from the stored map
+        // This must be a message authored by the user (from /slot command)
+        const userMessageId = slotGameMap.get(event.senderAddress)
         
-        // Attempt to send payout automatically using handler.sendTip()
-        // Use the messageId from the message we just sent
+        // Fallback to the tip event's messageId if not found in map
+        // This is the message the user tipped on, which should be valid
+        const payoutMessageId = userMessageId || event.messageId
+        
         if (!payoutMessageId || !event.channelId) {
-            console.error('Missing messageId or channelId for payout')
+            console.error('Missing messageId or channelId for payout', {
+                userMessageId,
+                eventMessageId: event.messageId,
+                channelId: event.channelId,
+            })
             await handler.sendMessage(
                 event.channelId || event.spaceId,
                 `⚠️ **Payout Error**\n\n` +
@@ -548,6 +559,16 @@ bot.onTip(async (handler, event) => {
             return
         }
         
+        console.log(`Using messageId ${payoutMessageId} for payout to ${event.senderAddress}`)
+        
+        await handler.sendMessage(
+            event.channelId,
+            `🎉 **You won ${payoutEth} ETH!**\n\n` +
+                `💰 **Sending your winnings now...**`,
+        )
+        
+        // Attempt to send payout automatically using handler.sendTip()
+        // Use the messageId from the user's message (stored from /slot command or from tip event)
         const payoutSuccess = await sendTipWithRetry(handler, event.senderAddress, payoutMessageId, event.channelId, totalPayout)
         
         if (payoutSuccess) {
@@ -560,12 +581,17 @@ bot.onTip(async (handler, event) => {
             console.log(`Successfully paid out ${payoutEth} ETH to ${event.senderAddress}`)
             
             // Send deployer fee if applicable
-            // Use the same messageId for the deployer fee
+            // For deployer fee, we can use the same messageId or the tip event's messageId
+            // Since deployer is receiving the tip, we should use a message they authored
+            // For now, use the tip event's messageId as fallback
             if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
                 const deployerFeeEth = (Number(totalDeployerFee) / 1e18).toFixed(6)
                 console.log(`Sending deployer fee: ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
                 
-                const feeSuccess = await sendTipWithRetry(handler, DEPLOYER_ADDRESS, payoutMessageId, event.channelId, totalDeployerFee)
+                // Use the tip event's messageId for deployer fee
+                // In a real scenario, you might want to track deployer messages separately
+                const deployerMessageId = event.messageId
+                const feeSuccess = await sendTipWithRetry(handler, DEPLOYER_ADDRESS, deployerMessageId, event.channelId, totalDeployerFee)
                 
                 if (feeSuccess) {
                     console.log(`Successfully sent deployer fee: ${deployerFeeEth} ETH`)
