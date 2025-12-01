@@ -1,10 +1,10 @@
-import { makeTownsBot, getSmartAccountFromUserId } from '@towns-protocol/bot'
+import { makeTownsBot } from '@towns-protocol/bot'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { writeContract, getBalance } from 'viem/actions'
 import { parseEther, zeroAddress } from 'viem'
 import commands from './commands'
-import { getJackpot, setJackpot, addPendingPayout, getPendingPayout, clearPendingPayout } from './db'
+import { getJackpot, setJackpot } from './db'
 
 // SimpleAccount ABI for sendCurrency function (per AGENTS.md line 258)
 // Using writeContract for SimpleAccount instead of handler.sendTip (which uses ERC-7821)
@@ -278,8 +278,7 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
         channelId,
         '**Available Commands:**\n\n' +
             '• `/help` - Show this help message\n' +
-            '• `/slot` - Play the slot machine (tip $0.25 per game)\n' +
-            '• `/claim` - Claim your pending winnings\n\n' +
+            '• `/slot` - Play the slot machine (tip $0.25 per game)\n\n' +
             '**Message Triggers:**\n\n' +
             "• Mention me - I'll respond\n" +
             "• React with 👋 - I'll wave back" +
@@ -339,195 +338,6 @@ bot.onReaction(async (handler, { reaction, channelId }) => {
     }
 })
 
-bot.onSlashCommand('claim', async (handler, { channelId, userId }) => {
-    console.log('Claim command received from user:', userId)
-    
-    // Get user's wallet address from userId
-    let userWalletAddress: string
-    try {
-        const walletAddress = await getSmartAccountFromUserId(bot, { userId })
-        if (walletAddress) {
-            userWalletAddress = walletAddress
-            console.log(`User wallet address: ${userWalletAddress}`)
-        } else {
-            // Fallback to userId if wallet is null
-            userWalletAddress = userId
-            console.log(`Wallet address is null, using userId: ${userWalletAddress}`)
-        }
-    } catch (error) {
-        console.error('Error getting user wallet address:', error)
-        // Fallback to userId if it's already an address
-        userWalletAddress = userId
-    }
-    
-    // Check pending payout using wallet address
-    const pendingAmount = getPendingPayout(userWalletAddress)
-    
-    if (pendingAmount === BigInt(0)) {
-        await handler.sendMessage(
-            channelId,
-            '💰 **No Pending Winnings**\n\n' +
-                'You don\'t have any pending winnings to claim.\n\n' +
-                'Play the slot machine with `/slot` to win! 🎰',
-        )
-        return
-    }
-    
-    const pendingEth = (Number(pendingAmount) / 1e18).toFixed(6)
-    
-    // Automatically attempt to claim when /claim is used
-    await handler.sendMessage(
-        channelId,
-        `💰 **Pending Winnings: ${pendingEth} ETH**\n\n` +
-            `Attempting to send your payout now... Please wait...`,
-    )
-    
-    // Try to send payout
-    const payoutSuccess = await sendTipWithRetry(
-        userWalletAddress as `0x${string}`,
-        pendingAmount,
-    )
-    
-    if (payoutSuccess) {
-        clearPendingPayout(userWalletAddress)
-        await handler.sendMessage(
-            channelId,
-            `✅ **Payout Successful!**\n\n` +
-                `💰 You've received ${pendingEth} ETH!\n\n` +
-                `Transaction completed. Thanks for playing! 🎰`,
-        )
-        console.log(`Successfully paid out ${pendingEth} ETH to ${userWalletAddress}`)
-    } else {
-        // If automatic payout fails, try to send button as fallback
-        try {
-            const { hexToBytes } = await import('viem')
-            await handler.sendInteractionRequest(
-                channelId,
-                {
-                    case: 'form' as const,
-                    value: {
-                        id: `claim-${userWalletAddress}`,
-                        title: 'Claim Your Winnings',
-                        components: [
-                            {
-                                id: 'claim-btn',
-                                component: {
-                                    case: 'button' as const,
-                                    value: { label: `Claim ${pendingEth} ETH` },
-                                },
-                            },
-                        ],
-                    },
-                },
-                hexToBytes(userWalletAddress as `0x${string}`),
-            )
-            await handler.sendMessage(
-                channelId,
-                `⚠️ **Automatic Payout Failed**\n\n` +
-                    `I couldn't send your payout automatically. Your winnings are still saved.\n\n` +
-                    `Try clicking the button above, or use \`/claim\` again later.`,
-            )
-        } catch (error) {
-            console.error('Error sending interaction request:', error)
-            await handler.sendMessage(
-                channelId,
-                `⚠️ **Payout Failed**\n\n` +
-                    `Sorry, I couldn't send your payout of ${pendingEth} ETH.\n\n` +
-                    `Your winnings are still saved. Please try \`/claim\` again later, or contact support if the problem persists.`,
-            )
-        }
-        console.error(`Failed to pay out ${pendingEth} ETH to ${userWalletAddress}`)
-    }
-})
-
-bot.onInteractionResponse(async (handler, event) => {
-    if (event.response.payload.content?.case === 'form') {
-        const form = event.response.payload.content.value
-        const requestId = form.requestId || ''
-        
-        // Check if this is a claim request
-        if (requestId.startsWith('claim-')) {
-            // Extract wallet address from requestId (format: claim-0x...)
-            const walletAddress = requestId.replace('claim-', '')
-            
-            // Also get wallet address from userId to verify
-            let userWalletAddress: string
-            try {
-                const walletAddr = await getSmartAccountFromUserId(bot, { userId: event.userId })
-                if (walletAddr) {
-                    userWalletAddress = walletAddr
-                    console.log(`User wallet address from userId: ${userWalletAddress}`)
-                    console.log(`Wallet address from requestId: ${walletAddress}`)
-                } else {
-                    userWalletAddress = event.userId
-                    console.log(`Wallet address is null, using userId: ${userWalletAddress}`)
-                }
-            } catch (error) {
-                console.error('Error getting user wallet address:', error)
-                userWalletAddress = event.userId
-            }
-            
-            // Use the wallet address from requestId (which matches how we stored it)
-            const pendingAmount = getPendingPayout(walletAddress)
-            
-            if (pendingAmount === BigInt(0)) {
-                // Also try with userId in case of mismatch
-                const pendingAmountAlt = getPendingPayout(userWalletAddress)
-                if (pendingAmountAlt === BigInt(0)) {
-                    await handler.sendMessage(
-                        event.channelId,
-                        '❌ **No Pending Winnings**\n\n' +
-                            'You don\'t have any pending winnings to claim.',
-                    )
-                    return
-                } else {
-                    // Found it with alternative address, use that
-                    const pendingEth = (Number(pendingAmountAlt) / 1e18).toFixed(6)
-                    await handler.sendMessage(
-                        event.channelId,
-                        `💰 Found pending winnings: ${pendingEth} ETH\n\n` +
-                            `Please use \`/claim\` again to claim.`,
-                    )
-                    return
-                }
-            }
-            
-            // Check if claim button was clicked
-            for (const component of form.components) {
-                if (component.component.case === 'button' && component.id === 'claim-btn') {
-                    const pendingEth = (Number(pendingAmount) / 1e18).toFixed(6)
-                    
-                    // Try to send payout to the wallet address
-                    const payoutSuccess = await sendTipWithRetry(
-                        walletAddress as `0x${string}`,
-                        pendingAmount,
-                    )
-                    
-                    if (payoutSuccess) {
-                        clearPendingPayout(walletAddress)
-                        await handler.sendMessage(
-                            event.channelId,
-                            `✅ **Payout Successful!**\n\n` +
-                                `💰 You've received ${pendingEth} ETH!\n\n` +
-                                `Transaction completed. Thanks for playing! 🎰`,
-                        )
-                        console.log(`Successfully paid out ${pendingEth} ETH to ${walletAddress}`)
-                    } else {
-                        await handler.sendMessage(
-                            event.channelId,
-                            `⚠️ **Payout Failed**\n\n` +
-                                `Sorry, I couldn't send your payout of ${pendingEth} ETH.\n\n` +
-                                `This may be due to a temporary network issue. Your winnings are still saved and you can try again later.\n\n` +
-                                `If this problem persists, please contact support.`,
-                        )
-                        console.error(`Failed to pay out ${pendingEth} ETH to ${walletAddress}`)
-                    }
-                    return
-                }
-            }
-        }
-    }
-})
 
 bot.onTip(async (handler, event) => {
     console.log('Tip event received:', {
@@ -663,42 +473,39 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(event.channelId, summary)
     }
 
-    // Store winnings as pending payout instead of sending automatically
+    // Automatically send payout when user wins
     if (totalPayout > 0) {
-        addPendingPayout(event.senderAddress, totalPayout)
         const payoutEth = (Number(totalPayout) / 1e18).toFixed(6)
         
         await handler.sendMessage(
             event.channelId,
             `🎉 **You won ${payoutEth} ETH!**\n\n` +
-                `💰 **Your winnings have been added to your account!**\n\n` +
-                `Use \`/claim\` to claim your winnings, or click the button below!`,
+                `💰 **Sending your winnings now...**`,
         )
         
-        // Send claim button
-        const { hexToBytes } = await import('viem')
-        await handler.sendInteractionRequest(
-            event.channelId,
-            {
-                case: 'form',
-                value: {
-                    id: `claim-${event.senderAddress}`,
-                    title: 'Claim Your Winnings',
-                    components: [
-                        {
-                            id: 'claim-btn',
-                            component: {
-                                case: 'button',
-                                value: { label: `Claim ${payoutEth} ETH` },
-                            },
-                        },
-                    ],
-                },
-            },
-            hexToBytes(event.senderAddress as `0x${string}`),
+        // Attempt to send payout automatically
+        const payoutSuccess = await sendTipWithRetry(
+            event.senderAddress as `0x${string}`,
+            totalPayout,
         )
         
-        console.log(`Added ${payoutEth} ETH to pending payouts for ${event.senderAddress}`)
+        if (payoutSuccess) {
+            await handler.sendMessage(
+                event.channelId,
+                `✅ **Payout Successful!**\n\n` +
+                    `💰 You've received ${payoutEth} ETH!\n\n` +
+                    `Transaction completed. Thanks for playing! 🎰`,
+            )
+            console.log(`Successfully paid out ${payoutEth} ETH to ${event.senderAddress}`)
+        } else {
+            await handler.sendMessage(
+                event.channelId,
+                `⚠️ **Payout Failed**\n\n` +
+                    `Sorry, I couldn't send your payout of ${payoutEth} ETH automatically.\n\n` +
+                    `This may be due to a temporary network issue. Please contact support if this problem persists.`,
+            )
+            console.error(`Failed to pay out ${payoutEth} ETH to ${event.senderAddress}`)
+        }
     }
 })
 const { jwtMiddleware, handler } = bot.start()
