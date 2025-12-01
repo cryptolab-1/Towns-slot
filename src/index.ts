@@ -4,7 +4,7 @@ import { logger } from 'hono/logger'
 import { writeContract, getBalance } from 'viem/actions'
 import { parseEther, zeroAddress } from 'viem'
 import commands from './commands'
-import { getJackpot, setJackpot } from './db'
+// Removed database jackpot - now using wallet balance directly
 
 // SimpleAccount ABI for sendCurrency function (per AGENTS.md line 258)
 // Using writeContract for SimpleAccount instead of handler.sendTip (which uses ERC-7821)
@@ -30,24 +30,57 @@ const ENTRY_FEE_DOLLARS = 0.25 // $0.25 per game
 
 // Fetch current ETH price in USD (always fetch fresh, no caching)
 async function getEthPrice(): Promise<number> {
-    try {
-        // Try CoinGecko API
-        const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd')
-        const data = await response.json()
-        const price = data.ethereum?.usd
+    const maxRetries = 3
+    const timeout = 10000 // 10 seconds
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`Fetching ETH price (attempt ${attempt}/${maxRetries})...`)
+            
+            // Create abort controller for timeout
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), timeout)
+            
+            // Try CoinGecko API
+            const response = await fetch(
+                'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
+                { signal: controller.signal }
+            )
+            
+            clearTimeout(timeoutId)
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+            }
+            
+            const data = await response.json()
+            const price = data.ethereum?.usd
 
-        if (price && price > 0) {
-            console.log(`ETH price fetched: $${price}`)
-            return price
+            if (price && price > 0) {
+                console.log(`✅ ETH price fetched: $${price}`)
+                return price
+            } else {
+                throw new Error('Invalid price data received')
+            }
+        } catch (error: any) {
+            if (error.name === 'AbortError') {
+                console.error(`ETH price fetch timeout (attempt ${attempt}/${maxRetries})`)
+            } else {
+                console.error(`Error fetching ETH price (attempt ${attempt}/${maxRetries}):`, error.message || error)
+            }
+            
+            if (attempt === maxRetries) {
+                console.error('❌ Failed to fetch ETH price after all retries')
+                throw new Error('Failed to fetch ETH price: All retries exhausted')
+            }
+            
+            // Wait before retry (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
         }
-    } catch (error) {
-        console.error('Error fetching ETH price:', error)
     }
-
-    // Fallback to default if fetch fails
-    const defaultPrice = 3000
-    console.log(`Warning: Using fallback ETH price: $${defaultPrice}`)
-    return defaultPrice
+    
+    // This should never be reached, but TypeScript needs it
+    throw new Error('Failed to fetch ETH price')
 }
 
 // Calculate entry fee in Wei based on current ETH price
@@ -275,11 +308,24 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
 
 bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     console.log('Slot command received from user:', userId)
-    // Always read fresh jackpot from database
-    const jackpot = getJackpot()
+    
+    // Get jackpot from actual wallet balance (bot.appAddress)
+    const jackpot = await getBalance(bot.viem, { address: bot.appAddress })
     const jackpotEth = Number(jackpot) / 1e18
-    // Always fetch fresh ETH price (no caching)
-    const ethPrice = await getEthPrice()
+    
+    // Always fetch fresh ETH price (no caching, with retries)
+    let ethPrice: number
+    try {
+        ethPrice = await getEthPrice()
+    } catch (error) {
+        console.error('Failed to fetch ETH price, cannot proceed:', error)
+        await handler.sendMessage(
+            channelId,
+            '⚠️ **Error:** Unable to fetch current ETH price. Please try again in a moment.',
+        )
+        return
+    }
+    
     const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
     const entryFeeWei = await getEntryFeeWei()
     
@@ -356,8 +402,19 @@ bot.onTip(async (handler, event) => {
     }
 
     // Get current entry fee in Wei based on current ETH price
+    let ethPrice: number
+    try {
+        ethPrice = await getEthPrice()
+    } catch (error) {
+        console.error('Failed to fetch ETH price for tip validation:', error)
+        await handler.sendMessage(
+            event.channelId,
+            '⚠️ **Error:** Unable to fetch current ETH price. Please try again in a moment.',
+        )
+        return
+    }
+    
     const entryFeeWei = await getEntryFeeWei()
-    const ethPrice = await getEthPrice()
     const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
     const receivedEth = Number(event.amount) / 1e18
     const receivedDollars = receivedEth * ethPrice
@@ -398,11 +455,10 @@ bot.onTip(async (handler, event) => {
     // Calculate actual entry fee used (based on number of games)
     const actualEntryFee = entryFeeWei * BigInt(numGames)
 
-    // Always read current jackpot from database before updating
-    let jackpot = getJackpot()
-    // Add all entry fees to jackpot
-    jackpot += actualEntryFee
-    setJackpot(jackpot)
+    // Jackpot is the actual wallet balance (bot.appAddress)
+    // Entry fees are automatically added to the wallet when users tip
+    // So we just read the current balance as the jackpot
+    let jackpot = await getBalance(bot.viem, { address: bot.appAddress })
 
     // Track total winnings and payouts across all games
     let totalWinnings = BigInt(0)
@@ -421,8 +477,8 @@ bot.onTip(async (handler, event) => {
         let hasFee = false
 
         if (winnings.percentage > 0) {
-            // Always read current jackpot from database before calculating payout
-            jackpot = getJackpot()
+            // Always read current jackpot from wallet balance before calculating payout
+            jackpot = await getBalance(bot.viem, { address: bot.appAddress })
             // Calculate percentage of jackpot
             const percentageMultiplier = BigInt(winnings.percentage)
             payoutAmount = (jackpot * percentageMultiplier) / BigInt(100)
@@ -437,9 +493,8 @@ bot.onTip(async (handler, event) => {
                 hasFee = true
             }
 
-            // Update jackpot (subtract full payout amount)
-            jackpot -= payoutAmount
-            setJackpot(jackpot)
+            // Note: We don't update jackpot here because it's the actual wallet balance
+            // The wallet balance will decrease automatically when we send payouts
 
             // Accumulate totals
             totalWinnings += payoutAmount
