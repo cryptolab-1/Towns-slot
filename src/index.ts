@@ -1,26 +1,11 @@
 import { makeTownsBot } from '@towns-protocol/bot'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
-import { writeContract, getBalance } from 'viem/actions'
-import { parseEther, zeroAddress } from 'viem'
+import { getBalance } from 'viem/actions'
 import commands from './commands'
 // Removed database jackpot - now using wallet balance directly
 
-// SimpleAccount ABI for sendCurrency function (per AGENTS.md line 258)
-// Using writeContract for SimpleAccount instead of handler.sendTip (which uses ERC-7821)
-const simpleAppAbi = [
-    {
-        inputs: [
-            { name: 'recipient', type: 'address' },
-            { name: 'currency', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-        ],
-        name: 'sendCurrency',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-    },
-] as const
+// Using handler.sendTip() for payouts (per Towns Protocol docs)
 
 // Slot machine symbols
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '🎰'] as const
@@ -231,21 +216,25 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
     commands,
 })
 
-// Helper function to send tip using writeContract (per AGENTS.md line 254-260)
-// handler.sendTip uses ERC-7821 which is not supported, so we use writeContract directly
+// Helper function to send tip using handler.sendTip() (per Towns Protocol docs)
 async function sendTipWithRetry(
-    userId: `0x${string}`,
+    handler: any,
+    userId: string,
+    messageId: string,
+    channelId: string,
     amount: bigint,
     maxRetries = 3,
 ): Promise<boolean> {
     const amountEth = Number(amount) / 1e18
     
-    // Check balances for both wallets (per AGENTS.md line 243-244)
+    // Check balances for both wallets (per Towns Protocol docs)
+    // Gas wallet (bot.botId) needs Base ETH for gas fees
+    // Bot treasury (bot.appAddress) needs ETH to send as tips
     try {
         const appBalance = await getBalance(bot.viem, { address: bot.appAddress })
         const botIdBalance = await getBalance(bot.viem, { address: bot.botId as `0x${string}` })
-        console.log(`Bot appAddress balance: ${(Number(appBalance) / 1e18).toFixed(6)} ETH`)
-        console.log(`Bot botId (gas) balance: ${(Number(botIdBalance) / 1e18).toFixed(6)} ETH`)
+        console.log(`Bot appAddress (treasury) balance: ${(Number(appBalance) / 1e18).toFixed(6)} ETH`)
+        console.log(`Bot botId (gas wallet) balance: ${(Number(botIdBalance) / 1e18).toFixed(6)} ETH`)
         console.log(`Required payout: ${amountEth.toFixed(6)} ETH`)
         
         if (appBalance < amount) {
@@ -257,58 +246,43 @@ async function sendTipWithRetry(
             console.warn(`Warning: botId (gas wallet) has no balance! Gas fees may fail.`)
         }
     } catch (error) {
-        console.error('Error checking balance:', error)
+        console.error('Error checking balances:', error)
+        return false
     }
-    
-    // Use writeContract with simpleAppAbi (per AGENTS.md line 254-260)
-    // This is for SimpleAccount and doesn't require ERC-7821
+
+    // Use handler.sendTip() per Towns Protocol docs
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            console.log(`Sending tip attempt ${attempt}/${maxRetries} (writeContract): ${amountEth.toFixed(6)} ETH to ${userId}`)
-            console.log('Contract call details:', {
-                address: bot.appAddress,
-                function: 'sendCurrency',
-                recipient: userId,
-                currency: zeroAddress,
-                amount: amount.toString(),
+            console.log(`Sending tip attempt ${attempt}/${maxRetries} (handler.sendTip): ${amountEth.toFixed(6)} ETH to ${userId}`)
+            
+            // Use handler.sendTip() per Towns Protocol documentation
+            await handler.sendTip({
+                userId,
+                messageId,
+                channelId,
+                amount,
             })
             
-            const hash = await writeContract(bot.viem, {
-                address: bot.appAddress,
-                abi: simpleAppAbi,
-                functionName: 'sendCurrency',
-                args: [userId, zeroAddress, amount],
-            })
-            
-            console.log(`Tip sent successfully via writeContract! Transaction hash: ${hash}`)
+            console.log(`Tip sent successfully via handler.sendTip()! Amount: ${amountEth.toFixed(6)} ETH`)
             return true
         } catch (error: any) {
-            console.error(`writeContract attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
-            console.error('Error details:', {
-                shortMessage: error?.shortMessage,
-                cause: error?.cause,
-                data: error?.data,
-                code: error?.code,
-                errorSignature: error?.data?.slice?.(0, 10), // First 4 bytes of error
-            })
+            console.error(`handler.sendTip attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
             
-            // Check if it's a known error
-            if (error?.data?.slice?.(0, 10) === '0x3c10b94e') {
-                console.error('Contract revert error 0x3c10b94e - This may indicate:')
-                console.error('1. The sendCurrency function requires specific permissions')
-                console.error('2. The contract may not support direct currency transfers')
-                console.error('3. The caller (bot.appAddress) may not be authorized')
+            if (attempt === maxRetries) {
+                console.error('All handler.sendTip attempts failed. Possible reasons:')
+                console.error('1. Insufficient balance in bot.appAddress (treasury)')
+                console.error('2. Insufficient gas in bot.botId (gas wallet)')
+                console.error('3. Network/connectivity issues')
+                console.error('4. Invalid parameters (userId, messageId, channelId)')
             }
             
+            // Wait before retry (exponential backoff)
             if (attempt < maxRetries) {
-                // Wait before retry (exponential backoff)
                 await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
-            } else {
-                console.error(`Failed to send tip after ${maxRetries} attempts`)
-                return false
             }
         }
     }
+    
     return false
 }
 
@@ -486,6 +460,7 @@ bot.onTip(async (handler, event) => {
     // Track total winnings and payouts across all games
     let totalWinnings = BigInt(0)
     let totalPayout = BigInt(0)
+    let totalDeployerFee = BigInt(0)
     const gameResults: string[] = []
 
     // Play multiple games
@@ -514,6 +489,7 @@ bot.onTip(async (handler, event) => {
                 feeAmount = (payoutAmount * BigInt(FEE_PERCENTAGE)) / BigInt(100)
                 winnerPayout = payoutAmount - feeAmount
                 hasFee = true
+                totalDeployerFee += feeAmount
             }
 
             // Note: We don't update jackpot here because it's the actual wallet balance
@@ -522,8 +498,6 @@ bot.onTip(async (handler, event) => {
             // Accumulate totals
             totalWinnings += payoutAmount
             totalPayout += winnerPayout
-
-            // Store fee amount for deployer (we'll send all fees at once at the end)
         }
 
         // Format and store result for this game
@@ -552,9 +526,24 @@ bot.onTip(async (handler, event) => {
                 `💰 **Sending your winnings now...**`,
         )
         
-        // Attempt to send payout automatically
+        // Attempt to send payout automatically using handler.sendTip()
+        // Need messageId and channelId from the tip event
+        if (!event.messageId || !event.channelId) {
+            console.error('Missing messageId or channelId for payout')
+            await handler.sendMessage(
+                event.channelId || event.spaceId,
+                `⚠️ **Payout Error**\n\n` +
+                    `Unable to send payout: Missing required event information.\n\n` +
+                    `Please contact support.`,
+            )
+            return
+        }
+        
         const payoutSuccess = await sendTipWithRetry(
-            event.senderAddress as `0x${string}`,
+            handler,
+            event.senderAddress,
+            event.messageId,
+            event.channelId,
             totalPayout,
         )
         
@@ -566,6 +555,26 @@ bot.onTip(async (handler, event) => {
                     `Transaction completed. Thanks for playing! 🎰`,
             )
             console.log(`Successfully paid out ${payoutEth} ETH to ${event.senderAddress}`)
+            
+            // Send deployer fee if applicable
+            if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
+                const deployerFeeEth = (Number(totalDeployerFee) / 1e18).toFixed(6)
+                console.log(`Sending deployer fee: ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
+                
+                const feeSuccess = await sendTipWithRetry(
+                    handler,
+                    DEPLOYER_ADDRESS,
+                    event.messageId,
+                    event.channelId,
+                    totalDeployerFee,
+                )
+                
+                if (feeSuccess) {
+                    console.log(`Successfully sent deployer fee: ${deployerFeeEth} ETH`)
+                } else {
+                    console.error(`Failed to send deployer fee: ${deployerFeeEth} ETH`)
+                }
+            }
         } else {
             await handler.sendMessage(
                 event.channelId,
