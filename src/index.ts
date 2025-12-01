@@ -5,7 +5,7 @@ import { getBalance } from 'viem/actions'
 import commands from './commands'
 // Removed database jackpot - now using wallet balance directly
 
-// Using handler.tip() for payouts (per Towns Protocol docs)
+// Using handler.sendTip() for payouts (per Towns Protocol docs)
 
 // Slot machine symbols
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '🎰'] as const
@@ -216,7 +216,7 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
     commands,
 })
 
-// Helper function to send tip using handler.tip() (per Towns Protocol docs)
+// Helper function to send tip using handler.sendTip() (per Towns Protocol docs)
 async function sendTipWithRetry(
     handler: any,
     to: string,
@@ -250,15 +250,15 @@ async function sendTipWithRetry(
         return false
     }
 
-    // Use handler.tip() per Towns Protocol docs
+    // Use handler.sendTip() per Towns Protocol docs
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            console.log(`Sending tip attempt ${attempt}/${maxRetries} (handler.tip): ${amountEth.toFixed(6)} ETH to ${to}`)
+            console.log(`Sending tip attempt ${attempt}/${maxRetries} (handler.sendTip): ${amountEth.toFixed(6)} ETH to ${to}`)
             
-            // Use handler.tip() per Towns Protocol documentation:
-            // await handler.tip({ to, amount, messageId, channelId, currency? })
-            const result = await handler.tip({
-                to,
+            // Use handler.sendTip() per current Towns Protocol documentation:
+            // await handler.sendTip({ userId, amount, messageId, channelId, currency? })
+            const result = await handler.sendTip({
+                userId: to,
                 amount,
                 messageId,
                 channelId,
@@ -266,21 +266,21 @@ async function sendTipWithRetry(
             })
             
             console.log(
-                `Tip sent successfully via handler.tip()! Amount: ${amountEth.toFixed(
+                `Tip sent successfully via handler.sendTip()! Amount: ${amountEth.toFixed(
                     6,
                 )} ETH, tx/event:`,
                 result,
             )
             return true
         } catch (error: any) {
-            console.error(`handler.tip attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
+            console.error(`handler.sendTip attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
             
             if (attempt === maxRetries) {
-                console.error('All handler.tip attempts failed. Possible reasons:')
+                console.error('All handler.sendTip attempts failed. Possible reasons:')
                 console.error('1. Insufficient balance in bot.appAddress (treasury)')
                 console.error('2. Insufficient gas in bot.botId (gas wallet)')
                 console.error('3. Network/connectivity issues')
-                console.error('4. Invalid parameters (to, messageId, channelId)')
+                console.error('4. Invalid parameters (to/userId, messageId, channelId)')
             }
             
             // Wait before retry (exponential backoff)
