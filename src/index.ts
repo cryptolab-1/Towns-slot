@@ -28,17 +28,8 @@ const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '�
 // Entry fee in dollars per game
 const ENTRY_FEE_DOLLARS = 0.25 // $0.25 per game
 
-// Cache for ETH price (update every 5 minutes)
-let ethPriceCache: { price: number; timestamp: number } | null = null
-const ETH_PRICE_CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
-
-// Fetch current ETH price in USD
+// Fetch current ETH price in USD (always fetch fresh, no caching)
 async function getEthPrice(): Promise<number> {
-    // Check cache first
-    if (ethPriceCache && Date.now() - ethPriceCache.timestamp < ETH_PRICE_CACHE_DURATION) {
-        return ethPriceCache.price
-    }
-
     try {
         // Try CoinGecko API
         const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd')
@@ -46,7 +37,6 @@ async function getEthPrice(): Promise<number> {
         const price = data.ethereum?.usd
 
         if (price && price > 0) {
-            ethPriceCache = { price, timestamp: Date.now() }
             console.log(`ETH price fetched: $${price}`)
             return price
         }
@@ -54,15 +44,9 @@ async function getEthPrice(): Promise<number> {
         console.error('Error fetching ETH price:', error)
     }
 
-    // Fallback to cached price or default
-    if (ethPriceCache) {
-        console.log(`Using cached ETH price: $${ethPriceCache.price}`)
-        return ethPriceCache.price
-    }
-
-    // Default fallback (conservative estimate)
+    // Fallback to default if fetch fails
     const defaultPrice = 3000
-    console.log(`Using default ETH price: $${defaultPrice}`)
+    console.log(`Warning: Using fallback ETH price: $${defaultPrice}`)
     return defaultPrice
 }
 
@@ -77,8 +61,8 @@ async function getEntryFeeWei(): Promise<bigint> {
 // Deployer wallet address (receives 10% fee on payouts)
 const DEPLOYER_ADDRESS = process.env.DEPLOYER_ADDRESS as `0x${string}`
 
-// Jackpot pool (accumulates all entry fees) - loaded from database
-let jackpot = getJackpot()
+// Jackpot pool (accumulates all entry fees) - always read from database when needed
+// Don't use a module-level variable to avoid sync issues
 
 // Payout percentages (of jackpot)
 const PAYOUT_PERCENTAGES = {
@@ -291,7 +275,10 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
 
 bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     console.log('Slot command received from user:', userId)
+    // Always read fresh jackpot from database
+    const jackpot = getJackpot()
     const jackpotEth = Number(jackpot) / 1e18
+    // Always fetch fresh ETH price (no caching)
     const ethPrice = await getEthPrice()
     const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
     const entryFeeWei = await getEntryFeeWei()
@@ -411,6 +398,8 @@ bot.onTip(async (handler, event) => {
     // Calculate actual entry fee used (based on number of games)
     const actualEntryFee = entryFeeWei * BigInt(numGames)
 
+    // Always read current jackpot from database before updating
+    let jackpot = getJackpot()
     // Add all entry fees to jackpot
     jackpot += actualEntryFee
     setJackpot(jackpot)
@@ -432,6 +421,8 @@ bot.onTip(async (handler, event) => {
         let hasFee = false
 
         if (winnings.percentage > 0) {
+            // Always read current jackpot from database before calculating payout
+            jackpot = getJackpot()
             // Calculate percentage of jackpot
             const percentageMultiplier = BigInt(winnings.percentage)
             payoutAmount = (jackpot * percentageMultiplier) / BigInt(100)

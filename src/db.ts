@@ -30,8 +30,11 @@ function readDatabase(): JackpotData {
 function writeDatabase(data: JackpotData): void {
     try {
         writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf-8')
+        const jackpotEth = (Number(data.amount) / 1e18).toFixed(6)
+        console.log(`✅ Database updated: Jackpot = ${jackpotEth} ETH (saved to ${dbPath})`)
     } catch (error) {
-        console.error('Error writing database:', error)
+        console.error('❌ Error writing database:', error)
+        console.error(`Database path: ${dbPath}`)
     }
 }
 
@@ -69,4 +72,5 @@ export function clearPendingPayout(userId: string): void {
 
 // Initialize database on first load
 const initialData = readDatabase()
-console.log(`Jackpot loaded from database: ${(Number(initialData.amount) / 1e18).toFixed(6)} ETH`)
+console.log(`📊 Database initialized: Jackpot = ${(Number(initialData.amount) / 1e18).toFixed(6)} ETH`)
+console.log(`📁 Database path: ${dbPath}`)
