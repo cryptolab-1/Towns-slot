@@ -502,15 +502,32 @@ bot.onTip(async (handler, event) => {
                 throw new Error('Could not find winner wallet')
             }
             
-            // Send payout using execute() - THE FIX: Add account parameter!
+            // Build calls array - include both user payout and deployer fee in one transaction
+            // This avoids nonce conflicts by sending both in a single execute() call
+            const calls: Array<{
+                to: `0x${string}`
+                value: bigint
+                data: `0x${string}`
+            }> = [{
+                to: winnerWallet as `0x${string}`,
+                value: totalPayout,
+                data: '0x' as `0x${string}`
+            }]
+            
+            // Add deployer fee to the same transaction if applicable
+            if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
+                calls.push({
+                    to: DEPLOYER_ADDRESS as `0x${string}`,
+                    value: totalDeployerFee,
+                    data: '0x' as `0x${string}`
+                })
+            }
+            
+            // Send payout (and deployer fee) using execute() - single transaction avoids nonce issues
             const paymentHash = await execute(bot.viem, {
                 address: bot.appAddress as `0x${string}`,
                 account: bot.viem.account,  // ← This fixes the ERC-7821 error!
-                calls: [{
-                    to: winnerWallet as `0x${string}`,
-                    value: totalPayout,
-                    data: '0x' as `0x${string}`
-                }]
+                calls: calls
             })
             
             // Wait for transaction confirmation
@@ -519,6 +536,12 @@ bot.onTip(async (handler, event) => {
             console.log(`✅ Payout sent! ${payoutEth} ETH to ${event.userId}`)
             console.log(`   Transaction: ${paymentHash}`)
             
+            // Log deployer fee if it was included
+            if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
+                const deployerFeeEth = formatEther(totalDeployerFee)
+                console.log(`✅ Deployer fee sent! ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
+            }
+            
             // Send success message
             await handler.sendMessage(
                 event.channelId,
@@ -526,32 +549,6 @@ bot.onTip(async (handler, event) => {
                     `💰 **Payment sent!**\n\n` +
                     `Transaction: \`${paymentHash}\``,
             )
-            
-            // Send deployer fee if applicable
-            if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
-                const deployerFeeEth = formatEther(totalDeployerFee)
-                
-                try {
-                    // Send deployer fee using execute()
-                    const deployerHash = await execute(bot.viem, {
-                        address: bot.appAddress as `0x${string}`,
-                        account: bot.viem.account,
-                        calls: [{
-                            to: DEPLOYER_ADDRESS,
-                            value: totalDeployerFee,
-                            data: '0x' as `0x${string}`
-                        }]
-                    })
-                    
-                    await waitForTransactionReceipt(bot.viem, { hash: deployerHash })
-                    
-                    console.log(`✅ Deployer fee sent! ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
-                    console.log(`   Transaction: ${deployerHash}`)
-                } catch (error) {
-                    console.error('❌ Deployer fee payment failed:', error)
-                    console.log(`⚠️ Deployer fee ${deployerFeeEth} ETH calculated but not sent`)
-                }
-            }
         } catch (error) {
             console.error('❌ Payment failed:', error)
             
