@@ -5,7 +5,7 @@ import { getBalance } from 'viem/actions'
 import commands from './commands'
 // Removed database jackpot - now using wallet balance directly
 
-// Using handler.sendTip() for payouts (per Towns Protocol docs)
+// Using handler.tip() for payouts (per Towns Protocol docs)
 
 // Slot machine symbols
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '🎰'] as const
@@ -216,10 +216,10 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
     commands,
 })
 
-// Helper function to send tip using handler.sendTip() (per Towns Protocol docs)
+// Helper function to send tip using handler.tip() (per Towns Protocol docs)
 async function sendTipWithRetry(
     handler: any,
-    userId: string,
+    to: string,
     messageId: string,
     channelId: string,
     amount: bigint,
@@ -250,30 +250,37 @@ async function sendTipWithRetry(
         return false
     }
 
-    // Use handler.sendTip() per Towns Protocol docs
+    // Use handler.tip() per Towns Protocol docs
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            console.log(`Sending tip attempt ${attempt}/${maxRetries} (handler.sendTip): ${amountEth.toFixed(6)} ETH to ${userId}`)
+            console.log(`Sending tip attempt ${attempt}/${maxRetries} (handler.tip): ${amountEth.toFixed(6)} ETH to ${to}`)
             
-            // Use handler.sendTip() per Towns Protocol documentation
-            await handler.sendTip({
-                userId,
+            // Use handler.tip() per Towns Protocol documentation:
+            // await handler.tip({ to, amount, messageId, channelId, currency? })
+            const result = await handler.tip({
+                to,
+                amount,
                 messageId,
                 channelId,
-                amount,
+                // currency omitted -> defaults to ETH
             })
             
-            console.log(`Tip sent successfully via handler.sendTip()! Amount: ${amountEth.toFixed(6)} ETH`)
+            console.log(
+                `Tip sent successfully via handler.tip()! Amount: ${amountEth.toFixed(
+                    6,
+                )} ETH, tx/event:`,
+                result,
+            )
             return true
         } catch (error: any) {
-            console.error(`handler.sendTip attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
+            console.error(`handler.tip attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
             
             if (attempt === maxRetries) {
-                console.error('All handler.sendTip attempts failed. Possible reasons:')
+                console.error('All handler.tip attempts failed. Possible reasons:')
                 console.error('1. Insufficient balance in bot.appAddress (treasury)')
                 console.error('2. Insufficient gas in bot.botId (gas wallet)')
                 console.error('3. Network/connectivity issues')
-                console.error('4. Invalid parameters (userId, messageId, channelId)')
+                console.error('4. Invalid parameters (to, messageId, channelId)')
             }
             
             // Wait before retry (exponential backoff)
@@ -541,13 +548,7 @@ bot.onTip(async (handler, event) => {
             return
         }
         
-        const payoutSuccess = await sendTipWithRetry(
-            handler,
-            event.senderAddress,
-            payoutMessageId,
-            event.channelId,
-            totalPayout,
-        )
+        const payoutSuccess = await sendTipWithRetry(handler, event.senderAddress, payoutMessageId, event.channelId, totalPayout)
         
         if (payoutSuccess) {
             await handler.sendMessage(
@@ -564,13 +565,7 @@ bot.onTip(async (handler, event) => {
                 const deployerFeeEth = (Number(totalDeployerFee) / 1e18).toFixed(6)
                 console.log(`Sending deployer fee: ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
                 
-                const feeSuccess = await sendTipWithRetry(
-                    handler,
-                    DEPLOYER_ADDRESS,
-                    payoutMessageId,
-                    event.channelId,
-                    totalDeployerFee,
-                )
+                const feeSuccess = await sendTipWithRetry(handler, DEPLOYER_ADDRESS, payoutMessageId, event.channelId, totalDeployerFee)
                 
                 if (feeSuccess) {
                     console.log(`Successfully sent deployer fee: ${deployerFeeEth} ETH`)
