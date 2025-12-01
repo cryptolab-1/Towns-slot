@@ -375,50 +375,68 @@ bot.onSlashCommand('claim', async (handler, { channelId, userId }) => {
     
     const pendingEth = (Number(pendingAmount) / 1e18).toFixed(6)
     
-    // Send claim button first, then message
-    try {
-        const { hexToBytes } = await import('viem')
-        const interactionPayload = {
-            case: 'form' as const,
-            value: {
-                id: `claim-${userWalletAddress}`,
-                title: 'Claim Your Winnings',
-                components: [
-                    {
-                        id: 'claim-btn',
-                        component: {
-                            case: 'button' as const,
-                            value: { label: `Claim ${pendingEth} ETH` },
-                        },
+    // Automatically attempt to claim when /claim is used
+    await handler.sendMessage(
+        channelId,
+        `💰 **Pending Winnings: ${pendingEth} ETH**\n\n` +
+            `Attempting to send your payout now... Please wait...`,
+    )
+    
+    // Try to send payout
+    const payoutSuccess = await sendTipWithRetry(
+        userWalletAddress as `0x${string}`,
+        pendingAmount,
+    )
+    
+    if (payoutSuccess) {
+        clearPendingPayout(userWalletAddress)
+        await handler.sendMessage(
+            channelId,
+            `✅ **Payout Successful!**\n\n` +
+                `💰 You've received ${pendingEth} ETH!\n\n` +
+                `Transaction completed. Thanks for playing! 🎰`,
+        )
+        console.log(`Successfully paid out ${pendingEth} ETH to ${userWalletAddress}`)
+    } else {
+        // If automatic payout fails, try to send button as fallback
+        try {
+            const { hexToBytes } = await import('viem')
+            await handler.sendInteractionRequest(
+                channelId,
+                {
+                    case: 'form' as const,
+                    value: {
+                        id: `claim-${userWalletAddress}`,
+                        title: 'Claim Your Winnings',
+                        components: [
+                            {
+                                id: 'claim-btn',
+                                component: {
+                                    case: 'button' as const,
+                                    value: { label: `Claim ${pendingEth} ETH` },
+                                },
+                            },
+                        ],
                     },
-                ],
-            },
+                },
+                hexToBytes(userWalletAddress as `0x${string}`),
+            )
+            await handler.sendMessage(
+                channelId,
+                `⚠️ **Automatic Payout Failed**\n\n` +
+                    `I couldn't send your payout automatically. Your winnings are still saved.\n\n` +
+                    `Try clicking the button above, or use \`/claim\` again later.`,
+            )
+        } catch (error) {
+            console.error('Error sending interaction request:', error)
+            await handler.sendMessage(
+                channelId,
+                `⚠️ **Payout Failed**\n\n` +
+                    `Sorry, I couldn't send your payout of ${pendingEth} ETH.\n\n` +
+                    `Your winnings are still saved. Please try \`/claim\` again later, or contact support if the problem persists.`,
+            )
         }
-        
-        console.log(`Sending interaction request for ${userWalletAddress}:`, JSON.stringify(interactionPayload, null, 2))
-        
-        await handler.sendInteractionRequest(
-            channelId,
-            interactionPayload,
-            hexToBytes(userWalletAddress as `0x${string}`),
-        )
-        
-        console.log(`Successfully sent claim button for ${userWalletAddress} with amount ${pendingEth} ETH`)
-        
-        // Send message after button
-        await handler.sendMessage(
-            channelId,
-            `💰 **Pending Winnings: ${pendingEth} ETH**\n\n` +
-                `Click the button above to claim your winnings!`,
-        )
-    } catch (error) {
-        console.error('Error sending interaction request:', error)
-        // Fallback: send message without button
-        await handler.sendMessage(
-            channelId,
-            `💰 **Pending Winnings: ${pendingEth} ETH**\n\n` +
-                `⚠️ Could not display claim button. Please try using \`/claim\` again or contact support.`,
-        )
+        console.error(`Failed to pay out ${pendingEth} ETH to ${userWalletAddress}`)
     }
 })
 
