@@ -6,14 +6,13 @@
       "name": "my-towns-bot",
       "dependencies": {
         "@connectrpc/connect-node": "^2.1.0",
-        "@towns-protocol/bot": "^0.0.425",
+        "@towns-protocol/bot": "^0.0.426",
         "@towns-protocol/proto": "^0.0.425",
         "@towns-protocol/web3": "^0.0.425",
         "hono": "^4.7.11",
         "viem": "^2.29.3",
       },
       "devDependencies": {
-        "@types/better-sqlite3": "^7.6.11",
         "@types/bun": "^1.3.1",
         "@types/node": "^20.14.8",
         "@typescript-eslint/eslint-plugin": "^8.29.0",
@@ -151,9 +150,9 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.0.0", "", {}, "sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA=="],
 
-    "@towns-protocol/bot": ["@towns-protocol/bot@0.0.425", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@connectrpc/connect-node": "^2.1.0", "@standard-schema/spec": "^1.0.0-beta.9", "@towns-protocol/encryption": "^0.0.425", "@towns-protocol/proto": "^0.0.425", "@towns-protocol/sdk": "^0.0.425", "@towns-protocol/sdk-crypto": "^0.0.425", "@towns-protocol/utils": "^0.0.425", "@towns-protocol/web3": "^0.0.425", "ethers": "^5.8.0", "image-size": "^2.0.2", "jsonwebtoken": "^9.0.2", "nanoevents": "^9.1.0", "superjson": "^2.2.2" }, "peerDependencies": { "hono": ">=4", "viem": "2.x" } }, "sha512-E6i/eEk4P8SDG4MnUCRnAjf5lG0KjD3ruyQCTaDHm8Z/cJDyv+d8W3jvD2Lr+OYZdum3+S+Oqxm+sg5bzwHrmA=="],
+    "@towns-protocol/bot": ["@towns-protocol/bot@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@connectrpc/connect-node": "^2.1.0", "@standard-schema/spec": "^1.0.0-beta.9", "@towns-protocol/encryption": "^0.0.426", "@towns-protocol/proto": "^0.0.426", "@towns-protocol/sdk": "^0.0.426", "@towns-protocol/sdk-crypto": "^0.0.426", "@towns-protocol/utils": "^0.0.426", "@towns-protocol/web3": "^0.0.426", "ethers": "^5.8.0", "image-size": "^2.0.2", "jsonwebtoken": "^9.0.2", "nanoevents": "^9.1.0", "superjson": "^2.2.2" }, "peerDependencies": { "hono": ">=4", "viem": "2.x" } }, "sha512-DiWi5f2H4CUZa+DLcDFX2AtzrE0zxGocJ+saHY42WBAlaEUDtOOOWQJ+MCeoU6aIwHmm8pKbXXMBYRa3x0c8sw=="],
 
-    "@towns-protocol/encryption": ["@towns-protocol/encryption@0.0.425", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@towns-protocol/olm": "3.2.28", "@towns-protocol/proto": "^0.0.425", "@towns-protocol/utils": "^0.0.425", "@towns-protocol/web3": "^0.0.425", "debug": "^4.3.4", "dexie": "^4.2.1", "ethers": "^5.8.0", "lru-cache": "^11.0.1", "nanoid": "^4.0.0", "typed-emitter": "^2.1.0" } }, "sha512-A40OLjQTC5xJd/bdqf3V/VDmhl9Va235J5gfH1tZB16wioR/nEzHEPHzBMb25q35nhWJrEgNIcmQovtRw9V+Zw=="],
+    "@towns-protocol/encryption": ["@towns-protocol/encryption@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@towns-protocol/olm": "3.2.28", "@towns-protocol/proto": "^0.0.426", "@towns-protocol/utils": "^0.0.426", "@towns-protocol/web3": "^0.0.426", "debug": "^4.3.4", "dexie": "^4.2.1", "ethers": "^5.8.0", "lru-cache": "^11.0.1", "nanoid": "^4.0.0", "typed-emitter": "^2.1.0" } }, "sha512-mc1Fw3q2EW95dlgcAJiRdDf5RbQDFz5OacQ9AYQISpAKsAvQ2mUI3UB7i/zHZWqPEG2oZb7uaZGAg88BuQDcuw=="],
 
     "@towns-protocol/generated": ["@towns-protocol/generated@0.0.425", "", { "dependencies": { "@ethersproject/abi": "^5.8.0", "@ethersproject/providers": "^5.8.0", "ethers": "^5.8.0" } }, "sha512-/t9Vd/mzKBM/hG6IksT8YMRPkFI5ocxdUk1U8yWjh3rJYIT6SuHnE25NFo3eFaiORpC4oMIExwsJx0RAOp8AzQ=="],
 
@@ -161,19 +160,17 @@
 
     "@towns-protocol/proto": ["@towns-protocol/proto@0.0.425", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0" } }, "sha512-ohO77679shDEVHY21ANGwxJwUEKsBQZ3kRGrg+1LHxAXNCMC+JR4L1q892quQtx9rzuys5mF0sZG6Zk1J9oY0w=="],
 
-    "@towns-protocol/rpc-connector": ["@towns-protocol/rpc-connector@0.0.425", "", { "dependencies": { "@connectrpc/connect": "^2.1.0" }, "peerDependencies": { "@connectrpc/connect-node": ">=2.0.0", "@connectrpc/connect-web": ">=2.0.0" }, "optionalPeers": ["@connectrpc/connect-node", "@connectrpc/connect-web"] }, "sha512-2U2rbupSROcEbzApyov08WD7+GfVTL1oKnVBk47NbpkrDsyVp+EvNCNcOStN+JYpeuliq9sCSZp6Lxjrp9/E/Q=="],
+    "@towns-protocol/rpc-connector": ["@towns-protocol/rpc-connector@0.0.426", "", { "dependencies": { "@connectrpc/connect": "^2.1.0" }, "peerDependencies": { "@connectrpc/connect-node": ">=2.0.0", "@connectrpc/connect-web": ">=2.0.0" }, "optionalPeers": ["@connectrpc/connect-node", "@connectrpc/connect-web"] }, "sha512-n59iCtpA3IcX0ikPPXI5kUU6wv+rHkJ46Rjsh3ySDfRy6TCH1bcU0lx22vg//TIc5fN2orvq3WDaqa5er3DAnw=="],
 
-    "@towns-protocol/sdk": ["@towns-protocol/sdk@0.0.425", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@connectrpc/connect": "^2.1.0", "@ethereumjs/util": "^10.0.0", "@noble/curves": "^1.9.1", "@noble/hashes": "^1.8.0", "@towns-protocol/encryption": "^0.0.425", "@towns-protocol/generated": "^0.0.425", "@towns-protocol/proto": "^0.0.425", "@towns-protocol/rpc-connector": "^0.0.425", "@towns-protocol/sdk-crypto": "^0.0.425", "@towns-protocol/utils": "^0.0.425", "@towns-protocol/web3": "^0.0.425", "debug": "^4.3.4", "dexie": "^4.2.1", "ethereum-cryptography": "^3.2.0", "ethers": "^5.8.0", "lodash-es": "^4.17.21", "nanoid": "^4.0.0", "p-limit": "^6.1.0" } }, "sha512-OADXheOa11BNn53QKcFLRCPae3g+ZgPxhupsd5tlrtWm0aKrvSo2GlEoibJh4A7ViIAYww4GWY3CFBrpLJGzeg=="],
+    "@towns-protocol/sdk": ["@towns-protocol/sdk@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@connectrpc/connect": "^2.1.0", "@ethereumjs/util": "^10.0.0", "@noble/curves": "^1.9.1", "@noble/hashes": "^1.8.0", "@towns-protocol/encryption": "^0.0.426", "@towns-protocol/generated": "^0.0.426", "@towns-protocol/proto": "^0.0.426", "@towns-protocol/rpc-connector": "^0.0.426", "@towns-protocol/sdk-crypto": "^0.0.426", "@towns-protocol/utils": "^0.0.426", "@towns-protocol/web3": "^0.0.426", "debug": "^4.3.4", "dexie": "^4.2.1", "ethereum-cryptography": "^3.2.0", "ethers": "^5.8.0", "lodash-es": "^4.17.21", "nanoid": "^4.0.0", "p-limit": "^6.1.0" } }, "sha512-dzYbeq7dIeuy0Gox3NDsKFo9BSvm1tH9pEKtrkQoDm3x4vR4XdhmSKNt5ZlZ6llF2D8AYs/qeUeNBrZFCWSVHQ=="],
 
-    "@towns-protocol/sdk-crypto": ["@towns-protocol/sdk-crypto@0.0.425", "", { "dependencies": { "@towns-protocol/encryption": "^0.0.425", "@towns-protocol/proto": "^0.0.425", "@towns-protocol/utils": "^0.0.425" } }, "sha512-T2h4+zURHDf+T5zBQhJm1o4PYoirjFA3b1d0KcCoYGLo2zhD54mZ27PMZmAl4MGPRKt18DQOIx/Kf/P1PXvDeA=="],
+    "@towns-protocol/sdk-crypto": ["@towns-protocol/sdk-crypto@0.0.426", "", { "dependencies": { "@towns-protocol/encryption": "^0.0.426", "@towns-protocol/proto": "^0.0.426", "@towns-protocol/utils": "^0.0.426" } }, "sha512-RJOJaotCc1R6zLOUUzNZWWc9FMoF0JGu6353/g+ADxfjACeCSbeeFDS4SOmhXwJc92kdtsZ7lLdPbyHjiANGtg=="],
 
-    "@towns-protocol/utils": ["@towns-protocol/utils@0.0.425", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@ethereumjs/util": "^10.0.0", "@noble/hashes": "^1.8.0", "@towns-protocol/proto": "^0.0.425", "debug": "^4.3.4", "ethereum-cryptography": "^3.2.0" } }, "sha512-WkNyH2Evrikjaym/2ksWr2qtk9oRzrlwA55WCMqqB1ShkPUhtBm4kbIwxewHYw5dxq24qYnGIOV4YwhOu2yEWA=="],
+    "@towns-protocol/utils": ["@towns-protocol/utils@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@ethereumjs/util": "^10.0.0", "@noble/hashes": "^1.8.0", "@towns-protocol/proto": "^0.0.426", "debug": "^4.3.4", "ethereum-cryptography": "^3.2.0" } }, "sha512-QyhJvrn5Gw3nUtPbsJKNvZQD6nctDBvCGbQqBPyU0kpkWNHk/Vym0kgsd/wy1g+Ony6JHvshV6AUPXlf15BNzg=="],
 
     "@towns-protocol/web3": ["@towns-protocol/web3@0.0.425", "", { "dependencies": { "@isaacs/ttlcache": "^1.4.1", "@towns-protocol/generated": "^0.0.425", "@towns-protocol/utils": "^0.0.425", "abitype": "^0.9.10", "debug": "^4.3.4", "ethers": "^5.8.0", "lru-cache": "^11.0.1", "nanoid": "^4.0.0", "viem": "^2.29.3", "zod": "^3.25.76" } }, "sha512-QG6H6R7sH2M9TJV+msX93SKBR76Z995rbm0ZNTb0CFH8AS52a1LOD4/s0i4NdCpWjIQoCNDXhxrUsulu6UvhQQ=="],
 
     "@tybys/wasm-util": ["@tybys/wasm-util@0.10.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg=="],
-
-    "@types/better-sqlite3": ["@types/better-sqlite3@7.6.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA=="],
 
     "@types/bun": ["@types/bun@1.3.3", "", { "dependencies": { "bun-types": "1.3.3" } }, "sha512-ogrKbJ2X5N0kWLLFKeytG0eHDleBYtngtlbu9cyBKFtNL3cnpDZkNdQj8flVf6WTZUX5ulI9AY1oa7ljhSrp+g=="],
 
@@ -567,6 +564,26 @@
 
     "@microsoft/tsdoc-config/ajv": ["ajv@8.12.0", "", { "dependencies": { "fast-deep-equal": "^3.1.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2", "uri-js": "^4.2.2" } }, "sha512-sRu1kpcO9yLtYxBKvqfTeh9KzZEwO3STyX1HT+4CaDzC6HpTGYhIhPIzj9XuKU7KYDwnaeh5hcOwjy1QuJzBPA=="],
 
+    "@towns-protocol/bot/@towns-protocol/proto": ["@towns-protocol/proto@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0" } }, "sha512-kCimdY7nkIzZekMbFStcjvO1bbgJhgQ9mZtPnJmi5X+RDjhthRGZugoFzf32YJDYPDNlFU1vgHYSWG7/FaC8XQ=="],
+
+    "@towns-protocol/bot/@towns-protocol/web3": ["@towns-protocol/web3@0.0.426", "", { "dependencies": { "@isaacs/ttlcache": "^1.4.1", "@towns-protocol/generated": "^0.0.426", "@towns-protocol/utils": "^0.0.426", "abitype": "^0.9.10", "debug": "^4.3.4", "ethers": "^5.8.0", "lru-cache": "^11.0.1", "nanoid": "^4.0.0", "viem": "^2.29.3", "zod": "^3.25.76" } }, "sha512-VZLx/2uY5LtjxNzQ3ByVLAotXKMpzs1m0BT7Ymp6CdQLlEtbtS57KJ0OATAtjdn5PUMTob7Lsx9/kvt3rjMncw=="],
+
+    "@towns-protocol/encryption/@towns-protocol/proto": ["@towns-protocol/proto@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0" } }, "sha512-kCimdY7nkIzZekMbFStcjvO1bbgJhgQ9mZtPnJmi5X+RDjhthRGZugoFzf32YJDYPDNlFU1vgHYSWG7/FaC8XQ=="],
+
+    "@towns-protocol/encryption/@towns-protocol/web3": ["@towns-protocol/web3@0.0.426", "", { "dependencies": { "@isaacs/ttlcache": "^1.4.1", "@towns-protocol/generated": "^0.0.426", "@towns-protocol/utils": "^0.0.426", "abitype": "^0.9.10", "debug": "^4.3.4", "ethers": "^5.8.0", "lru-cache": "^11.0.1", "nanoid": "^4.0.0", "viem": "^2.29.3", "zod": "^3.25.76" } }, "sha512-VZLx/2uY5LtjxNzQ3ByVLAotXKMpzs1m0BT7Ymp6CdQLlEtbtS57KJ0OATAtjdn5PUMTob7Lsx9/kvt3rjMncw=="],
+
+    "@towns-protocol/sdk/@towns-protocol/generated": ["@towns-protocol/generated@0.0.426", "", { "dependencies": { "@ethersproject/abi": "^5.8.0", "@ethersproject/providers": "^5.8.0", "ethers": "^5.8.0" } }, "sha512-V54yWmt3sf9mN2rYpElvkER00e2QOYgKG/K0IlYoH9GaM8t/QQUx3X//HqB9fK/FgS1U4q4F4GI+48wcQpuNhw=="],
+
+    "@towns-protocol/sdk/@towns-protocol/proto": ["@towns-protocol/proto@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0" } }, "sha512-kCimdY7nkIzZekMbFStcjvO1bbgJhgQ9mZtPnJmi5X+RDjhthRGZugoFzf32YJDYPDNlFU1vgHYSWG7/FaC8XQ=="],
+
+    "@towns-protocol/sdk/@towns-protocol/web3": ["@towns-protocol/web3@0.0.426", "", { "dependencies": { "@isaacs/ttlcache": "^1.4.1", "@towns-protocol/generated": "^0.0.426", "@towns-protocol/utils": "^0.0.426", "abitype": "^0.9.10", "debug": "^4.3.4", "ethers": "^5.8.0", "lru-cache": "^11.0.1", "nanoid": "^4.0.0", "viem": "^2.29.3", "zod": "^3.25.76" } }, "sha512-VZLx/2uY5LtjxNzQ3ByVLAotXKMpzs1m0BT7Ymp6CdQLlEtbtS57KJ0OATAtjdn5PUMTob7Lsx9/kvt3rjMncw=="],
+
+    "@towns-protocol/sdk-crypto/@towns-protocol/proto": ["@towns-protocol/proto@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0" } }, "sha512-kCimdY7nkIzZekMbFStcjvO1bbgJhgQ9mZtPnJmi5X+RDjhthRGZugoFzf32YJDYPDNlFU1vgHYSWG7/FaC8XQ=="],
+
+    "@towns-protocol/utils/@towns-protocol/proto": ["@towns-protocol/proto@0.0.426", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0" } }, "sha512-kCimdY7nkIzZekMbFStcjvO1bbgJhgQ9mZtPnJmi5X+RDjhthRGZugoFzf32YJDYPDNlFU1vgHYSWG7/FaC8XQ=="],
+
+    "@towns-protocol/web3/@towns-protocol/utils": ["@towns-protocol/utils@0.0.425", "", { "dependencies": { "@bufbuild/protobuf": "^2.9.0", "@ethereumjs/util": "^10.0.0", "@noble/hashes": "^1.8.0", "@towns-protocol/proto": "^0.0.425", "debug": "^4.3.4", "ethereum-cryptography": "^3.2.0" } }, "sha512-WkNyH2Evrikjaym/2ksWr2qtk9oRzrlwA55WCMqqB1ShkPUhtBm4kbIwxewHYw5dxq24qYnGIOV4YwhOu2yEWA=="],
+
     "@typescript-eslint/typescript-estree/minimatch": ["minimatch@9.0.5", "", { "dependencies": { "brace-expansion": "^2.0.1" } }, "sha512-G6T0ZX48xgozx7587koeX9Ys2NYy6Gmv//P89sEte9V9whIapMNF4idKxnW2QtCcLiTWlb/wfCabAtAFWhhBow=="],
 
     "@typescript-eslint/visitor-keys/eslint-visitor-keys": ["eslint-visitor-keys@4.2.1", "", {}, "sha512-Uhdk5sfqcee/9H/rCOJikYz67o0a2Tw2hGRPOG2Y1R2dg7brRe1uG0yaNQDHu+TO/uQPF/5eCapvYSmHUjt7JQ=="],
@@ -586,6 +603,10 @@
     "viem/abitype": ["abitype@1.1.0", "", { "peerDependencies": { "typescript": ">=5.0.4", "zod": "^3.22.0 || ^4.0.0" }, "optionalPeers": ["typescript", "zod"] }, "sha512-6Vh4HcRxNMLA0puzPjM5GBgT4aAcFGKZzSgAXvuZ27shJP6NEpielTuqbBmZILR5/xd0PizkBGy5hReKz9jl5A=="],
 
     "@microsoft/tsdoc-config/ajv/json-schema-traverse": ["json-schema-traverse@1.0.0", "", {}, "sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug=="],
+
+    "@towns-protocol/bot/@towns-protocol/web3/@towns-protocol/generated": ["@towns-protocol/generated@0.0.426", "", { "dependencies": { "@ethersproject/abi": "^5.8.0", "@ethersproject/providers": "^5.8.0", "ethers": "^5.8.0" } }, "sha512-V54yWmt3sf9mN2rYpElvkER00e2QOYgKG/K0IlYoH9GaM8t/QQUx3X//HqB9fK/FgS1U4q4F4GI+48wcQpuNhw=="],
+
+    "@towns-protocol/encryption/@towns-protocol/web3/@towns-protocol/generated": ["@towns-protocol/generated@0.0.426", "", { "dependencies": { "@ethersproject/abi": "^5.8.0", "@ethersproject/providers": "^5.8.0", "ethers": "^5.8.0" } }, "sha512-V54yWmt3sf9mN2rYpElvkER00e2QOYgKG/K0IlYoH9GaM8t/QQUx3X//HqB9fK/FgS1U4q4F4GI+48wcQpuNhw=="],
 
     "@typescript-eslint/typescript-estree/minimatch/brace-expansion": ["brace-expansion@2.0.2", "", { "dependencies": { "balanced-match": "^1.0.0" } }, "sha512-Jt0vHyM+jmUBqojB7E1NIYadt0vI0Qxjxd2TErW94wDz+E2LAm5vKMXXwg6ZZBTHPuUlDgQHKXvjGBdfcF1ZDQ=="],
 

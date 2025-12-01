@@ -2,6 +2,7 @@ import { makeTownsBot } from '@towns-protocol/bot'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { getBalance } from 'viem/actions'
+import { formatEther } from 'viem'
 import commands from './commands'
 // Removed database jackpot - now using wallet balance directly
 
@@ -216,86 +217,8 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
     commands,
 })
 
-// Map to store user message IDs for tip payouts
-// Key: userId, Value: messageId (must be a message authored by the user)
-const slotGameMap = new Map<string, string>()
-
-// Helper function to send tip using handler.sendTip() (per Towns Protocol docs)
-async function sendTipWithRetry(
-    handler: any,
-    to: string,
-    messageId: string,
-    channelId: string,
-    amount: bigint,
-    maxRetries = 3,
-): Promise<boolean> {
-    const amountEth = Number(amount) / 1e18
-    
-    // Check balances for both wallets (per Towns Protocol docs)
-    // Gas wallet (bot.botId) needs Base ETH for gas fees
-    // Bot treasury (bot.appAddress) needs ETH to send as tips
-    try {
-        const appBalance = await getBalance(bot.viem, { address: bot.appAddress })
-        const botIdBalance = await getBalance(bot.viem, { address: bot.botId as `0x${string}` })
-        console.log(`Bot appAddress (treasury) balance: ${(Number(appBalance) / 1e18).toFixed(6)} ETH`)
-        console.log(`Bot botId (gas wallet) balance: ${(Number(botIdBalance) / 1e18).toFixed(6)} ETH`)
-        console.log(`Required payout: ${amountEth.toFixed(6)} ETH`)
-        
-        if (appBalance < amount) {
-            console.error(`Insufficient balance in appAddress! Have ${(Number(appBalance) / 1e18).toFixed(6)} ETH, need ${amountEth.toFixed(6)} ETH`)
-            return false
-        }
-        
-        if (botIdBalance === BigInt(0)) {
-            console.warn(`Warning: botId (gas wallet) has no balance! Gas fees may fail.`)
-        }
-    } catch (error) {
-        console.error('Error checking balances:', error)
-        return false
-    }
-
-    // Use handler.sendTip() per Towns Protocol docs
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            console.log(`Sending tip attempt ${attempt}/${maxRetries} (handler.sendTip): ${amountEth.toFixed(6)} ETH to ${to}`)
-            
-            // Use handler.sendTip() per current Towns Protocol documentation:
-            // await handler.sendTip({ userId, amount, messageId, channelId, currency? })
-            const result = await handler.sendTip({
-                userId: to,
-                amount,
-                messageId,
-                channelId,
-                // currency omitted -> defaults to ETH
-            })
-            
-            console.log(
-                `Tip sent successfully via handler.sendTip()! Amount: ${amountEth.toFixed(
-                    6,
-                )} ETH, tx/event:`,
-                result,
-            )
-            return true
-        } catch (error: any) {
-            console.error(`handler.sendTip attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
-            
-            if (attempt === maxRetries) {
-                console.error('All handler.sendTip attempts failed. Possible reasons:')
-                console.error('1. Insufficient balance in bot.appAddress (treasury)')
-                console.error('2. Insufficient gas in bot.botId (gas wallet)')
-                console.error('3. Network/connectivity issues')
-                console.error('4. Invalid parameters (to/userId, messageId, channelId)')
-            }
-            
-            // Wait before retry (exponential backoff)
-            if (attempt < maxRetries) {
-                await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
-            }
-        }
-    }
-    
-    return false
-}
+// Removed sendTipWithRetry wrapper - now using handler.sendTip() directly
+// Removed slotGameMap - now using event.messageId directly (the original tip message)
 
 bot.onSlashCommand('help', async (handler, { channelId }) => {
     console.log('Help command received')
@@ -314,13 +237,8 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
     console.log('Help command response sent')
 })
 
-bot.onSlashCommand('slot', async (handler, { channelId, userId, eventId }) => {
+bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     console.log('Slot command received from user:', userId)
-    
-    // Store the user's eventId for later use in tip payouts
-    // This eventId represents a user-authored event (the slash command)
-    slotGameMap.set(userId, eventId)
-    console.log(`Stored messageId ${eventId} for user ${userId}`)
     
     // Get jackpot from actual wallet balance (bot.appAddress)
     const jackpot = await getBalance(bot.viem, { address: bot.appAddress })
@@ -534,73 +452,47 @@ bot.onTip(async (handler, event) => {
 
     // Automatically send payout when user wins
     if (totalPayout > 0) {
-        const payoutEth = (Number(totalPayout) / 1e18).toFixed(6)
+        const payoutEth = formatEther(totalPayout)
         
-        // Get the user's messageId from the stored map
-        // This must be a message authored by the user (from /slot command)
-        // Use userId as key (not senderAddress) since sendTip expects userId
-        const userMessageId = slotGameMap.get(event.userId)
-        
-        // Fallback to the tip event's messageId if not found in map
-        // This is the message the user tipped on, which should be valid
-        const payoutMessageId = userMessageId || event.messageId
-        
-        if (!payoutMessageId || !event.channelId) {
-            console.error('Missing messageId or channelId for payout', {
-                userMessageId,
-                eventMessageId: event.messageId,
-                channelId: event.channelId,
+        try {
+            // ✅ CORRECT - Direct tip to winner using original tip message
+            const result = await handler.sendTip({
+                userId: event.userId,        // ✅ Winner's Towns userId
+                amount: totalPayout,         // ✅ Amount in wei (bigint)
+                messageId: event.messageId,  // ✅ Use the ORIGINAL tip message (not bot's message)
+                channelId: event.channelId   // ✅ Channel ID
             })
-            await handler.sendMessage(
-                event.channelId || event.spaceId,
-                `⚠️ **Payout Error**\n\n` +
-                    `Unable to send payout: Missing required event information.\n\n` +
-                    `Please contact support.`,
-            )
-            return
-        }
-        
-        console.log(`Using messageId ${payoutMessageId} for payout to ${event.userId}`)
-        
-        await handler.sendMessage(
-            event.channelId,
-            `🎉 **You won ${payoutEth} ETH!**\n\n` +
-                `💰 **Sending your winnings now...**`,
-        )
-        
-        // Attempt to send payout automatically using handler.sendTip()
-        // Use the messageId from the user's message (stored from /slot command or from tip event)
-        // IMPORTANT: sendTip expects userId, not wallet address
-        const payoutSuccess = await sendTipWithRetry(handler, event.userId, payoutMessageId, event.channelId, totalPayout)
-        
-        if (payoutSuccess) {
+            
+            console.log(`✅ Payout sent! ${payoutEth} ETH to ${event.userId}`)
+            console.log(`   Transaction: ${result.txHash}`)
+            
+            // Now send success message AFTER the tip
             await handler.sendMessage(
                 event.channelId,
-                `✅ **Payout Successful!**\n\n` +
-                    `💰 You've received ${payoutEth} ETH!\n\n` +
-                    `Transaction completed. Thanks for playing! 🎰`,
+                `🎉 **You won ${payoutEth} ETH!**\n\n` +
+                    `💰 **Payment sent!**\n\n` +
+                    `Transaction: \`${result.txHash}\``,
             )
-            console.log(`Successfully paid out ${payoutEth} ETH to ${event.userId}`)
             
             // Send deployer fee if applicable
             // NOTE: DEPLOYER_ADDRESS is a wallet address, but sendTip needs a userId
             // For now, we'll skip deployer fee payout via sendTip since we don't have the deployer's userId
             // The deployer fee could be handled manually or through a different mechanism
             if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
-                const deployerFeeEth = (Number(totalDeployerFee) / 1e18).toFixed(6)
+                const deployerFeeEth = formatEther(totalDeployerFee)
                 console.log(`⚠️ Deployer fee ${deployerFeeEth} ETH calculated but not sent automatically`)
                 console.log(`   Deployer address: ${DEPLOYER_ADDRESS}`)
                 console.log(`   Note: sendTip requires userId, not wallet address. Manual payout needed.`)
-                // TODO: Implement deployer fee payout mechanism (may require different approach)
             }
-        } else {
+        } catch (error) {
+            console.error('❌ Payment failed:', error)
+            
             await handler.sendMessage(
                 event.channelId,
-                `⚠️ **Payout Failed**\n\n` +
-                    `Sorry, I couldn't send your payout of ${payoutEth} ETH automatically.\n\n` +
-                    `This may be due to a temporary network issue. Please contact support if this problem persists.`,
+                `⚠️ **Payout Error**\n\n` +
+                    `Unable to send ${payoutEth} ETH.\n\n` +
+                    `Please contact support.`,
             )
-            console.error(`Failed to pay out ${payoutEth} ETH to ${event.userId}`)
         }
     }
 })
