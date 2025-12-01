@@ -347,36 +347,77 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(event.channelId, summary)
     }
 
-    // Send total payout to winner (if any winnings)
-    if (totalPayout > 0) {
-        try {
-            await handler.sendTip({
-                userId: event.senderAddress,
-                amount: totalPayout,
-                messageId: event.messageId,
-                channelId: event.channelId,
-            })
-
-            // Send total fee to deployer (10% of total winnings)
-            if (DEPLOYER_ADDRESS && totalWinnings > 0) {
-                const totalFee = totalWinnings - totalPayout
-                if (totalFee > 0) {
-                    await handler.sendTip({
-                        userId: DEPLOYER_ADDRESS,
-                        amount: totalFee,
-                        messageId: event.messageId,
-                        channelId: event.channelId,
-                    })
+    // Helper function to send tip with retry
+    async function sendTipWithRetry(
+        userId: `0x${string}`,
+        amount: bigint,
+        messageId: string,
+        channelId: string,
+        maxRetries = 3,
+    ): Promise<boolean> {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                await handler.sendTip({
+                    userId,
+                    amount,
+                    messageId,
+                    channelId,
+                })
+                return true
+            } catch (error) {
+                console.error(`Tip send attempt ${attempt}/${maxRetries} failed:`, error)
+                if (attempt < maxRetries) {
+                    // Wait before retry (exponential backoff)
+                    await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
+                } else {
+                    console.error(`Failed to send tip after ${maxRetries} attempts:`, error)
+                    return false
                 }
             }
-        } catch (error) {
+        }
+        return false
+    }
+
+    // Send total payout to winner (if any winnings)
+    if (totalPayout > 0) {
+        const winnerPayoutSuccess = await sendTipWithRetry(
+            event.senderAddress,
+            totalPayout,
+            event.messageId,
+            event.channelId,
+        )
+
+        if (!winnerPayoutSuccess) {
             // If payout fails, add the amounts back to jackpot
             jackpot += totalWinnings
             await handler.sendMessage(
                 event.channelId,
-                `⚠️ Sorry, I couldn't send your payout. Please contact the bot administrator.`,
+                `⚠️ **Payout Error**\n\n` +
+                    `Sorry, I couldn't send your payout of ${(Number(totalPayout) / 1e18).toFixed(6)} ETH.\n` +
+                    `This may be due to a temporary network issue.\n\n` +
+                    `Your winnings have been returned to the jackpot. Please try again or contact support.`,
             )
+            console.error('Failed to send winner payout, jackpot restored')
             return
+        }
+
+        // Send total fee to deployer (10% of total winnings) - only if winner payout succeeded
+        if (DEPLOYER_ADDRESS && totalWinnings > 0) {
+            const totalFee = totalWinnings - totalPayout
+            if (totalFee > 0) {
+                const feePayoutSuccess = await sendTipWithRetry(
+                    DEPLOYER_ADDRESS,
+                    totalFee,
+                    event.messageId,
+                    event.channelId,
+                )
+
+                if (!feePayoutSuccess) {
+                    // If fee payout fails, log but don't fail the whole transaction
+                    console.error('Failed to send deployer fee, but winner payout succeeded')
+                    // Optionally, we could add the fee back to jackpot or handle it differently
+                }
+            }
         }
     }
 })
