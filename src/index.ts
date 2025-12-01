@@ -301,7 +301,7 @@ bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     await handler.sendMessage(
         channelId,
         '🎰 **Welcome to the Slot Machine!** 🎰\n\n' +
-            `To play, send me a tip of **$${ENTRY_FEE_DOLLARS.toFixed(2)}** (${entryFeeEth.toFixed(6)} ETH) per game\n\n` +
+            `To play, send me a tip of **$${ENTRY_FEE_DOLLARS.toFixed(2)}** per game\n\n` +
             '**How to play:**\n' +
             `1. Tip me $${ENTRY_FEE_DOLLARS.toFixed(2)} for 1 game\n` +
             `2. Tip me more to play multiple games! (e.g., $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} = 4 games)\n` +
@@ -411,8 +411,8 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(
             event.channelId,
             `❌ Invalid tip amount!\n\n` +
-                `You sent: $${receivedDollars.toFixed(2)} (${receivedEth.toFixed(6)} ETH)\n` +
-                `Required: $${ENTRY_FEE_DOLLARS.toFixed(2)} (${entryFeeEth.toFixed(6)} ETH) per game\n\n` +
+                `You sent: $${receivedDollars.toFixed(2)}\n` +
+                `Required: $${ENTRY_FEE_DOLLARS.toFixed(2)} per game\n\n` +
                 `Tip must be a multiple of $${ENTRY_FEE_DOLLARS.toFixed(2)} to play! 🎰\n` +
                 `Examples: $${ENTRY_FEE_DOLLARS.toFixed(2)} (1 game), $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} (4 games)\n` +
                 `💵 Current ETH Price: $${ethPrice.toFixed(2)}\n` +
