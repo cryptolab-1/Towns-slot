@@ -483,14 +483,18 @@ bot.onTip(async (handler, event) => {
             // If payout fails, add the amounts back to jackpot
             jackpot += totalWinnings
             setJackpot(jackpot)
+            const payoutEth = (Number(totalPayout) / 1e18).toFixed(6)
             await handler.sendMessage(
                 event.channelId,
                 `⚠️ **Payout Error**\n\n` +
-                    `Sorry, I couldn't send your payout of ${(Number(totalPayout) / 1e18).toFixed(6)} ETH.\n` +
-                    `This may be due to a temporary network issue.\n\n` +
-                    `Your winnings have been returned to the jackpot. Please try again or contact support.`,
+                    `Sorry, I couldn't send your payout of ${payoutEth} ETH automatically.\n\n` +
+                    `**Your winnings:** ${payoutEth} ETH\n` +
+                    `**Your address:** ${event.senderAddress}\n\n` +
+                    `Your winnings have been returned to the jackpot. Please contact the bot administrator to receive your payout manually.\n\n` +
+                    `The bot's contract may not support automatic payouts. This is a known issue we're working to resolve.`,
             )
             console.error('Failed to send winner payout, jackpot restored')
+            console.error(`Manual payout required: ${payoutEth} ETH to ${event.senderAddress}`)
             return
         }
 
