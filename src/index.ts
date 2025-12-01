@@ -28,59 +28,82 @@ const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '�
 // Entry fee in dollars per game
 const ENTRY_FEE_DOLLARS = 0.25 // $0.25 per game
 
-// Fetch current ETH price in USD (always fetch fresh, no caching)
+// Fetch current ETH price in USD using multiple fallback APIs
 async function getEthPrice(): Promise<number> {
-    const maxRetries = 3
-    const timeout = 10000 // 10 seconds
+    const timeout = 8000 // 8 seconds per API
     
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    // List of APIs to try in order (with fallbacks)
+    const apis = [
+        {
+            name: 'Binance',
+            url: 'https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT',
+            parse: (data: any) => parseFloat(data.price),
+        },
+        {
+            name: 'Coinbase',
+            url: 'https://api.coinbase.com/v2/exchange-rates?currency=ETH',
+            parse: (data: any) => parseFloat(data.data.rates.USD),
+        },
+        {
+            name: 'Kraken',
+            url: 'https://api.kraken.com/0/public/Ticker?pair=ETHUSD',
+            parse: (data: any) => parseFloat(data.result.XETHZUSD.c[0]), // Last trade price
+        },
+        {
+            name: 'CoinGecko',
+            url: 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
+            parse: (data: any) => data.ethereum?.usd,
+        },
+    ]
+    
+    // Try each API in order
+    for (const api of apis) {
         try {
-            console.log(`Fetching ETH price (attempt ${attempt}/${maxRetries})...`)
+            console.log(`Fetching ETH price from ${api.name}...`)
             
             // Create abort controller for timeout
             const controller = new AbortController()
             const timeoutId = setTimeout(() => controller.abort(), timeout)
             
-            // Try CoinGecko API
-            const response = await fetch(
-                'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
-                { signal: controller.signal }
-            )
+            const response = await fetch(api.url, {
+                signal: controller.signal,
+                headers: {
+                    'Accept': 'application/json',
+                },
+            })
             
             clearTimeout(timeoutId)
             
             if (!response.ok) {
+                if (response.status === 429) {
+                    console.log(`⚠️ ${api.name} rate limited, trying next API...`)
+                    continue // Try next API
+                }
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`)
             }
             
             const data = await response.json()
-            const price = data.ethereum?.usd
+            const price = api.parse(data)
 
-            if (price && price > 0) {
-                console.log(`✅ ETH price fetched: $${price}`)
+            if (price && price > 0 && isFinite(price)) {
+                console.log(`✅ ETH price fetched from ${api.name}: $${price.toFixed(2)}`)
                 return price
             } else {
-                throw new Error('Invalid price data received')
+                throw new Error(`Invalid price data from ${api.name}`)
             }
         } catch (error: any) {
             if (error.name === 'AbortError') {
-                console.error(`ETH price fetch timeout (attempt ${attempt}/${maxRetries})`)
+                console.log(`⏱️ ${api.name} timeout, trying next API...`)
             } else {
-                console.error(`Error fetching ETH price (attempt ${attempt}/${maxRetries}):`, error.message || error)
+                console.log(`⚠️ ${api.name} failed: ${error.message || error}, trying next API...`)
             }
-            
-            if (attempt === maxRetries) {
-                console.error('❌ Failed to fetch ETH price after all retries')
-                throw new Error('Failed to fetch ETH price: All retries exhausted')
-            }
-            
-            // Wait before retry (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+            // Continue to next API
         }
     }
     
-    // This should never be reached, but TypeScript needs it
-    throw new Error('Failed to fetch ETH price')
+    // If all APIs fail, throw error
+    console.error('❌ All ETH price APIs failed')
+    throw new Error('Failed to fetch ETH price from all available APIs')
 }
 
 // Calculate entry fee in Wei based on current ETH price
