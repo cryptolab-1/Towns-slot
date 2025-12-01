@@ -439,6 +439,8 @@ bot.onTip(async (handler, event) => {
         const winnerPayoutSuccess = await sendTipWithRetry(
             event.senderAddress as `0x${string}`,
             totalPayout,
+            event.messageId,
+            event.channelId,
         )
 
         if (!winnerPayoutSuccess) {
