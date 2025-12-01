@@ -4,6 +4,7 @@ import { logger } from 'hono/logger'
 import { writeContract } from 'viem/actions'
 import { parseEther, zeroAddress } from 'viem'
 import commands from './commands'
+import { getJackpot, setJackpot } from './db'
 
 // SimpleAccount ABI for sendCurrency function
 const simpleAppAbi = [
@@ -75,8 +76,8 @@ async function getEntryFeeWei(): Promise<bigint> {
 // Deployer wallet address (receives 10% fee on payouts)
 const DEPLOYER_ADDRESS = process.env.DEPLOYER_ADDRESS as `0x${string}`
 
-// Jackpot pool (accumulates all entry fees)
-let jackpot = BigInt(0)
+// Jackpot pool (accumulates all entry fees) - loaded from database
+let jackpot = getJackpot()
 
 // Payout percentages (of jackpot)
 const PAYOUT_PERCENTAGES = {
@@ -306,6 +307,7 @@ bot.onTip(async (handler, event) => {
 
     // Add all entry fees to jackpot
     jackpot += actualEntryFee
+    setJackpot(jackpot)
 
     // Track total winnings and payouts across all games
     let totalWinnings = BigInt(0)
@@ -340,6 +342,7 @@ bot.onTip(async (handler, event) => {
 
             // Update jackpot (subtract full payout amount)
             jackpot -= payoutAmount
+            setJackpot(jackpot)
 
             // Accumulate totals
             totalWinnings += payoutAmount
@@ -411,6 +414,7 @@ bot.onTip(async (handler, event) => {
         if (!winnerPayoutSuccess) {
             // If payout fails, add the amounts back to jackpot
             jackpot += totalWinnings
+            setJackpot(jackpot)
             await handler.sendMessage(
                 event.channelId,
                 `⚠️ **Payout Error**\n\n` +

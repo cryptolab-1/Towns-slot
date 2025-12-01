@@ -31,3 +31,6 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+
+# Database
+jackpot.json
