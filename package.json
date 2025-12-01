@@ -15,21 +15,21 @@
   "dependencies": {
     "@connectrpc/connect-node": "^2.1.0",
     "@towns-protocol/bot": "^0.0.426",
-    "@towns-protocol/proto": "^0.0.425",
-    "@towns-protocol/web3": "^0.0.425",
+    "@towns-protocol/proto": "^0.0.426",
+    "@towns-protocol/web3": "^0.0.426",
     "hono": "^4.7.11",
     "viem": "^2.29.3"
   },
   "devDependencies": {
     "@types/bun": "^1.3.1",
-    "@types/node": "^20.14.8",
+    "@types/node": "^20.19.25",
     "@typescript-eslint/eslint-plugin": "^8.29.0",
     "@typescript-eslint/parser": "^8.29.0",
     "eslint": "^8.57.1",
     "eslint-import-resolver-typescript": "^4.3.2",
     "eslint-plugin-import-x": "^4.10.2",
-    "eslint-plugin-tsdoc": "^0.3.0",
-    "typescript": "~5.8.3"
+    "eslint-plugin-tsdoc": "^0.5.0",
+    "typescript": "^5.9.3"
   },
   "files": [
     "/dist"
