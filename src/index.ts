@@ -1,4 +1,4 @@
-import { makeTownsBot } from '@towns-protocol/bot'
+import { makeTownsBot, getSmartAccountFromUserId } from '@towns-protocol/bot'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { writeContract, getBalance } from 'viem/actions'
@@ -341,7 +341,27 @@ bot.onReaction(async (handler, { reaction, channelId }) => {
 
 bot.onSlashCommand('claim', async (handler, { channelId, userId }) => {
     console.log('Claim command received from user:', userId)
-    const pendingAmount = getPendingPayout(userId)
+    
+    // Get user's wallet address from userId
+    let userWalletAddress: string
+    try {
+        const walletAddress = await getSmartAccountFromUserId(bot, { userId })
+        if (walletAddress) {
+            userWalletAddress = walletAddress
+            console.log(`User wallet address: ${userWalletAddress}`)
+        } else {
+            // Fallback to userId if wallet is null
+            userWalletAddress = userId
+            console.log(`Wallet address is null, using userId: ${userWalletAddress}`)
+        }
+    } catch (error) {
+        console.error('Error getting user wallet address:', error)
+        // Fallback to userId if it's already an address
+        userWalletAddress = userId
+    }
+    
+    // Check pending payout using wallet address
+    const pendingAmount = getPendingPayout(userWalletAddress)
     
     if (pendingAmount === BigInt(0)) {
         await handler.sendMessage(
@@ -362,7 +382,7 @@ bot.onSlashCommand('claim', async (handler, { channelId, userId }) => {
         {
             case: 'form',
             value: {
-                id: `claim-${userId}`,
+                id: `claim-${userWalletAddress}`,
                 title: 'Claim Your Winnings',
                 components: [
                     {
@@ -375,7 +395,7 @@ bot.onSlashCommand('claim', async (handler, { channelId, userId }) => {
                 ],
             },
         },
-        hexToBytes(userId as `0x${string}`),
+        hexToBytes(userWalletAddress as `0x${string}`),
     )
     
     await handler.sendMessage(
@@ -392,16 +412,49 @@ bot.onInteractionResponse(async (handler, event) => {
         
         // Check if this is a claim request
         if (requestId.startsWith('claim-')) {
-            const userId = event.userId
-            const pendingAmount = getPendingPayout(userId)
+            // Extract wallet address from requestId (format: claim-0x...)
+            const walletAddress = requestId.replace('claim-', '')
+            
+            // Also get wallet address from userId to verify
+            let userWalletAddress: string
+            try {
+                const walletAddr = await getSmartAccountFromUserId(bot, { userId: event.userId })
+                if (walletAddr) {
+                    userWalletAddress = walletAddr
+                    console.log(`User wallet address from userId: ${userWalletAddress}`)
+                    console.log(`Wallet address from requestId: ${walletAddress}`)
+                } else {
+                    userWalletAddress = event.userId
+                    console.log(`Wallet address is null, using userId: ${userWalletAddress}`)
+                }
+            } catch (error) {
+                console.error('Error getting user wallet address:', error)
+                userWalletAddress = event.userId
+            }
+            
+            // Use the wallet address from requestId (which matches how we stored it)
+            const pendingAmount = getPendingPayout(walletAddress)
             
             if (pendingAmount === BigInt(0)) {
-                await handler.sendMessage(
-                    event.channelId,
-                    '❌ **No Pending Winnings**\n\n' +
-                        'You don\'t have any pending winnings to claim.',
-                )
-                return
+                // Also try with userId in case of mismatch
+                const pendingAmountAlt = getPendingPayout(userWalletAddress)
+                if (pendingAmountAlt === BigInt(0)) {
+                    await handler.sendMessage(
+                        event.channelId,
+                        '❌ **No Pending Winnings**\n\n' +
+                            'You don\'t have any pending winnings to claim.',
+                    )
+                    return
+                } else {
+                    // Found it with alternative address, use that
+                    const pendingEth = (Number(pendingAmountAlt) / 1e18).toFixed(6)
+                    await handler.sendMessage(
+                        event.channelId,
+                        `💰 Found pending winnings: ${pendingEth} ETH\n\n` +
+                            `Please use \`/claim\` again to claim.`,
+                    )
+                    return
+                }
             }
             
             // Check if claim button was clicked
@@ -409,21 +462,21 @@ bot.onInteractionResponse(async (handler, event) => {
                 if (component.component.case === 'button' && component.id === 'claim-btn') {
                     const pendingEth = (Number(pendingAmount) / 1e18).toFixed(6)
                     
-                    // Try to send payout
+                    // Try to send payout to the wallet address
                     const payoutSuccess = await sendTipWithRetry(
-                        userId as `0x${string}`,
+                        walletAddress as `0x${string}`,
                         pendingAmount,
                     )
                     
                     if (payoutSuccess) {
-                        clearPendingPayout(userId)
+                        clearPendingPayout(walletAddress)
                         await handler.sendMessage(
                             event.channelId,
                             `✅ **Payout Successful!**\n\n` +
                                 `💰 You've received ${pendingEth} ETH!\n\n` +
                                 `Transaction completed. Thanks for playing! 🎰`,
                         )
-                        console.log(`Successfully paid out ${pendingEth} ETH to ${userId}`)
+                        console.log(`Successfully paid out ${pendingEth} ETH to ${walletAddress}`)
                     } else {
                         await handler.sendMessage(
                             event.channelId,
@@ -432,7 +485,7 @@ bot.onInteractionResponse(async (handler, event) => {
                                 `This may be due to a temporary network issue. Your winnings are still saved and you can try again later.\n\n` +
                                 `If this problem persists, please contact support.`,
                         )
-                        console.error(`Failed to pay out ${pendingEth} ETH to ${userId}`)
+                        console.error(`Failed to pay out ${pendingEth} ETH to ${walletAddress}`)
                     }
                     return
                 }
