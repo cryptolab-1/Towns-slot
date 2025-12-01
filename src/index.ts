@@ -538,7 +538,8 @@ bot.onTip(async (handler, event) => {
         
         // Get the user's messageId from the stored map
         // This must be a message authored by the user (from /slot command)
-        const userMessageId = slotGameMap.get(event.senderAddress)
+        // Use userId as key (not senderAddress) since sendTip expects userId
+        const userMessageId = slotGameMap.get(event.userId)
         
         // Fallback to the tip event's messageId if not found in map
         // This is the message the user tipped on, which should be valid
@@ -559,7 +560,7 @@ bot.onTip(async (handler, event) => {
             return
         }
         
-        console.log(`Using messageId ${payoutMessageId} for payout to ${event.senderAddress}`)
+        console.log(`Using messageId ${payoutMessageId} for payout to ${event.userId}`)
         
         await handler.sendMessage(
             event.channelId,
@@ -569,7 +570,8 @@ bot.onTip(async (handler, event) => {
         
         // Attempt to send payout automatically using handler.sendTip()
         // Use the messageId from the user's message (stored from /slot command or from tip event)
-        const payoutSuccess = await sendTipWithRetry(handler, event.senderAddress, payoutMessageId, event.channelId, totalPayout)
+        // IMPORTANT: sendTip expects userId, not wallet address
+        const payoutSuccess = await sendTipWithRetry(handler, event.userId, payoutMessageId, event.channelId, totalPayout)
         
         if (payoutSuccess) {
             await handler.sendMessage(
@@ -578,26 +580,18 @@ bot.onTip(async (handler, event) => {
                     `💰 You've received ${payoutEth} ETH!\n\n` +
                     `Transaction completed. Thanks for playing! 🎰`,
             )
-            console.log(`Successfully paid out ${payoutEth} ETH to ${event.senderAddress}`)
+            console.log(`Successfully paid out ${payoutEth} ETH to ${event.userId}`)
             
             // Send deployer fee if applicable
-            // For deployer fee, we can use the same messageId or the tip event's messageId
-            // Since deployer is receiving the tip, we should use a message they authored
-            // For now, use the tip event's messageId as fallback
+            // NOTE: DEPLOYER_ADDRESS is a wallet address, but sendTip needs a userId
+            // For now, we'll skip deployer fee payout via sendTip since we don't have the deployer's userId
+            // The deployer fee could be handled manually or through a different mechanism
             if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
                 const deployerFeeEth = (Number(totalDeployerFee) / 1e18).toFixed(6)
-                console.log(`Sending deployer fee: ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
-                
-                // Use the tip event's messageId for deployer fee
-                // In a real scenario, you might want to track deployer messages separately
-                const deployerMessageId = event.messageId
-                const feeSuccess = await sendTipWithRetry(handler, DEPLOYER_ADDRESS, deployerMessageId, event.channelId, totalDeployerFee)
-                
-                if (feeSuccess) {
-                    console.log(`Successfully sent deployer fee: ${deployerFeeEth} ETH`)
-                } else {
-                    console.error(`Failed to send deployer fee: ${deployerFeeEth} ETH`)
-                }
+                console.log(`⚠️ Deployer fee ${deployerFeeEth} ETH calculated but not sent automatically`)
+                console.log(`   Deployer address: ${DEPLOYER_ADDRESS}`)
+                console.log(`   Note: sendTip requires userId, not wallet address. Manual payout needed.`)
+                // TODO: Implement deployer fee payout mechanism (may require different approach)
             }
         } else {
             await handler.sendMessage(
@@ -606,7 +600,7 @@ bot.onTip(async (handler, event) => {
                     `Sorry, I couldn't send your payout of ${payoutEth} ETH automatically.\n\n` +
                     `This may be due to a temporary network issue. Please contact support if this problem persists.`,
             )
-            console.error(`Failed to pay out ${payoutEth} ETH to ${event.senderAddress}`)
+            console.error(`Failed to pay out ${payoutEth} ETH to ${event.userId}`)
         }
     }
 })
