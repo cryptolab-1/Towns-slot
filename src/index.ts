@@ -217,23 +217,6 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
 // Removed sendTipWithRetry wrapper - now using handler.sendTip() directly
 // Removed slotGameMap - now using event.messageId directly (the original tip message)
 
-bot.onSlashCommand('help', async (handler, { channelId }) => {
-    console.log('Help command received')
-    await handler.sendMessage(
-        channelId,
-        '**Available Commands:**\n\n' +
-            '• `/help` - Show this help message\n' +
-            '• `/slot` - Play the slot machine (tip $0.25 per game)\n\n' +
-            '**Message Triggers:**\n\n' +
-            "• Mention me - I'll respond\n" +
-            "• React with 👋 - I'll wave back" +
-            '• Say "hello" - I\'ll greet you back\n' +
-            '• Say "ping" - I\'ll show latency\n' +
-            '• Say "react" - I\'ll add a reaction\n',
-    )
-    console.log('Help command response sent')
-})
-
 bot.onSlashCommand('jackpot', async (handler, { channelId }) => {
     console.log('Jackpot command received')
     
