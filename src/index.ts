@@ -6,7 +6,7 @@ import commands from './commands'
 // Slot machine symbols
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '🎰'] as const
 
-// Entry fee: $0.25 = 0.00025 ETH = 250000000000000 Wei (assuming ETH ~$1000)
+// Entry fee: 0.00025 ETH = 250000000000000 Wei per game
 const ENTRY_FEE_WEI = BigInt('250000000000000') // 0.00025 ETH
 
 // Deployer wallet address (receives 10% fee on payouts)
@@ -132,7 +132,7 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
         channelId,
         '**Available Commands:**\n\n' +
             '• `/help` - Show this help message\n' +
-            '• `/slot` - Play the slot machine (tip $0.10 to play)\n\n' +
+            '• `/slot` - Play the slot machine (tip 0.00025 ETH per game)\n\n' +
             '**Message Triggers:**\n\n' +
             "• Mention me - I'll respond\n" +
             "• React with 👋 - I'll wave back" +
@@ -150,10 +150,10 @@ bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     await handler.sendMessage(
         channelId,
         '🎰 **Welcome to the Slot Machine!** 🎰\n\n' +
-            `To play, send me a tip of **$${entryFeeEth * 1000} (${entryFeeEth} ETH)** per game\n\n` +
+            `To play, send me a tip of **${entryFeeEth.toFixed(6)} ETH** per game\n\n` +
             '**How to play:**\n' +
-            `1. Tip me ${entryFeeEth} ETH for 1 game\n` +
-            `2. Tip me more to play multiple games! (e.g., ${(entryFeeEth * 4).toFixed(4)} ETH = 4 games)\n` +
+            `1. Tip me ${entryFeeEth.toFixed(6)} ETH for 1 game\n` +
+            `2. Tip me more to play multiple games! (e.g., ${(entryFeeEth * 4).toFixed(6)} ETH = 4 games)\n` +
             '3. I\'ll spin the reels for you!\n\n' +
             `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n\n` +
             '**Payouts (percentage of jackpot):**\n' +
@@ -202,7 +202,7 @@ bot.onTip(async (handler, event) => {
             event.channelId,
             `❌ Invalid tip amount!\n\n` +
                 `You sent: ${receivedEth.toFixed(6)} ETH\n` +
-                `Required: ${requiredEth.toFixed(6)} ETH per game ($${(requiredEth * 1000).toFixed(2)})\n\n` +
+                `Required: ${requiredEth.toFixed(6)} ETH per game\n\n` +
                 `Tip must be a multiple of ${requiredEth.toFixed(6)} ETH to play! 🎰\n` +
                 `Examples: ${requiredEth.toFixed(6)} ETH (1 game), ${(requiredEth * 4).toFixed(6)} ETH (4 games)`,
         )
