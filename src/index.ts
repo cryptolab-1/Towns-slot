@@ -6,8 +6,54 @@ import commands from './commands'
 // Slot machine symbols
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '🎰'] as const
 
-// Entry fee: 0.00025 ETH = 250000000000000 Wei per game
-const ENTRY_FEE_WEI = BigInt('250000000000000') // 0.00025 ETH
+// Entry fee in dollars per game
+const ENTRY_FEE_DOLLARS = 0.25 // $0.25 per game
+
+// Cache for ETH price (update every 5 minutes)
+let ethPriceCache: { price: number; timestamp: number } | null = null
+const ETH_PRICE_CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+
+// Fetch current ETH price in USD
+async function getEthPrice(): Promise<number> {
+    // Check cache first
+    if (ethPriceCache && Date.now() - ethPriceCache.timestamp < ETH_PRICE_CACHE_DURATION) {
+        return ethPriceCache.price
+    }
+
+    try {
+        // Try CoinGecko API
+        const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd')
+        const data = await response.json()
+        const price = data.ethereum?.usd
+
+        if (price && price > 0) {
+            ethPriceCache = { price, timestamp: Date.now() }
+            console.log(`ETH price fetched: $${price}`)
+            return price
+        }
+    } catch (error) {
+        console.error('Error fetching ETH price:', error)
+    }
+
+    // Fallback to cached price or default
+    if (ethPriceCache) {
+        console.log(`Using cached ETH price: $${ethPriceCache.price}`)
+        return ethPriceCache.price
+    }
+
+    // Default fallback (conservative estimate)
+    const defaultPrice = 3000
+    console.log(`Using default ETH price: $${defaultPrice}`)
+    return defaultPrice
+}
+
+// Calculate entry fee in Wei based on current ETH price
+async function getEntryFeeWei(): Promise<bigint> {
+    const ethPrice = await getEthPrice()
+    const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
+    const entryFeeWei = BigInt(Math.floor(entryFeeEth * 1e18))
+    return entryFeeWei
+}
 
 // Deployer wallet address (receives 10% fee on payouts)
 const DEPLOYER_ADDRESS = process.env.DEPLOYER_ADDRESS as `0x${string}`
@@ -132,7 +178,7 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
         channelId,
         '**Available Commands:**\n\n' +
             '• `/help` - Show this help message\n' +
-            '• `/slot` - Play the slot machine (tip 0.00025 ETH per game)\n\n' +
+            '• `/slot` - Play the slot machine (tip $0.25 per game)\n\n' +
             '**Message Triggers:**\n\n' +
             "• Mention me - I'll respond\n" +
             "• React with 👋 - I'll wave back" +
@@ -146,16 +192,20 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
 bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     console.log('Slot command received from user:', userId)
     const jackpotEth = Number(jackpot) / 1e18
-    const entryFeeEth = Number(ENTRY_FEE_WEI) / 1e18
+    const ethPrice = await getEthPrice()
+    const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
+    const entryFeeWei = await getEntryFeeWei()
+    
     await handler.sendMessage(
         channelId,
         '🎰 **Welcome to the Slot Machine!** 🎰\n\n' +
-            `To play, send me a tip of **${entryFeeEth.toFixed(6)} ETH** per game\n\n` +
+            `To play, send me a tip of **$${ENTRY_FEE_DOLLARS.toFixed(2)}** (${entryFeeEth.toFixed(6)} ETH) per game\n\n` +
             '**How to play:**\n' +
-            `1. Tip me ${entryFeeEth.toFixed(6)} ETH for 1 game\n` +
-            `2. Tip me more to play multiple games! (e.g., ${(entryFeeEth * 4).toFixed(6)} ETH = 4 games)\n` +
+            `1. Tip me $${ENTRY_FEE_DOLLARS.toFixed(2)} for 1 game\n` +
+            `2. Tip me more to play multiple games! (e.g., $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} = 4 games)\n` +
             '3. I\'ll spin the reels for you!\n\n' +
-            `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n\n` +
+            `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n` +
+            `💵 **Current ETH Price:** $${ethPrice.toFixed(2)}\n\n` +
             '**Payouts (percentage of jackpot):**\n' +
             '• Three 💎 = 100% (JACKPOT!)\n' +
             '• Three of a kind = 50%\n' +
@@ -194,27 +244,40 @@ bot.onTip(async (handler, event) => {
         return
     }
 
+    // Get current entry fee in Wei based on current ETH price
+    const entryFeeWei = await getEntryFeeWei()
+    const ethPrice = await getEthPrice()
+    const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
+    const receivedEth = Number(event.amount) / 1e18
+    const receivedDollars = receivedEth * ethPrice
+
     // Check if tip amount is a multiple of entry fee
-    if (event.amount < ENTRY_FEE_WEI || event.amount % ENTRY_FEE_WEI !== BigInt(0)) {
-        const receivedEth = Number(event.amount) / 1e18
-        const requiredEth = Number(ENTRY_FEE_WEI) / 1e18
+    // Allow small tolerance for price fluctuations (within 2%)
+    const tolerance = entryFeeWei / BigInt(50) // 2% tolerance
+    const remainder = event.amount % entryFeeWei
+    const isMultiple = remainder <= tolerance || remainder >= entryFeeWei - tolerance
+    
+    if (event.amount < entryFeeWei - tolerance || !isMultiple) {
         await handler.sendMessage(
             event.channelId,
             `❌ Invalid tip amount!\n\n` +
-                `You sent: ${receivedEth.toFixed(6)} ETH\n` +
-                `Required: ${requiredEth.toFixed(6)} ETH per game\n\n` +
-                `Tip must be a multiple of ${requiredEth.toFixed(6)} ETH to play! 🎰\n` +
-                `Examples: ${requiredEth.toFixed(6)} ETH (1 game), ${(requiredEth * 4).toFixed(6)} ETH (4 games)`,
+                `You sent: $${receivedDollars.toFixed(2)} (${receivedEth.toFixed(6)} ETH)\n` +
+                `Required: $${ENTRY_FEE_DOLLARS.toFixed(2)} (${entryFeeEth.toFixed(6)} ETH) per game\n\n` +
+                `Tip must be a multiple of $${ENTRY_FEE_DOLLARS.toFixed(2)} to play! 🎰\n` +
+                `Examples: $${ENTRY_FEE_DOLLARS.toFixed(2)} (1 game), $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} (4 games)\n` +
+                `💵 Current ETH Price: $${ethPrice.toFixed(2)}`,
         )
         return
     }
 
-    // Calculate number of games
-    const numGames = Number(event.amount / ENTRY_FEE_WEI)
-    const entryFeeEth = Number(ENTRY_FEE_WEI) / 1e18
+    // Calculate number of games (round to nearest)
+    const numGames = Math.round(Number(event.amount) / Number(entryFeeWei))
+    
+    // Calculate actual entry fee used (based on number of games)
+    const actualEntryFee = entryFeeWei * BigInt(numGames)
 
     // Add all entry fees to jackpot
-    jackpot += event.amount
+    jackpot += actualEntryFee
 
     // Track total winnings and payouts across all games
     let totalWinnings = BigInt(0)
