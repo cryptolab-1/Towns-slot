@@ -403,7 +403,7 @@ bot.onTip(async (handler, event) => {
         // Check balances for both wallets (per AGENTS.md line 243-244)
         try {
             const appBalance = await getBalance(bot.viem, { address: bot.appAddress })
-            const botIdBalance = await getBalance(bot.viem, { address: bot.botId })
+            const botIdBalance = await getBalance(bot.viem, { address: bot.botId as `0x${string}` })
             console.log(`Bot appAddress balance: ${(Number(appBalance) / 1e18).toFixed(6)} ETH`)
             console.log(`Bot botId (gas) balance: ${(Number(botIdBalance) / 1e18).toFixed(6)} ETH`)
             console.log(`Required payout: ${amountEth.toFixed(6)} ETH`)
