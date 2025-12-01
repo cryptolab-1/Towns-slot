@@ -6,7 +6,7 @@ import { parseEther, zeroAddress } from 'viem'
 import commands from './commands'
 import { getJackpot, setJackpot } from './db'
 
-// SimpleAccount ABI for sendCurrency function
+// SimpleAccount ABI for sendCurrency function with error definitions
 const simpleAppAbi = [
     {
         inputs: [
@@ -18,6 +18,32 @@ const simpleAppAbi = [
         outputs: [],
         stateMutability: 'nonpayable',
         type: 'function',
+    },
+    // Error definitions
+    {
+        type: 'error',
+        name: 'SimpleApp__InvalidAddressInput',
+        inputs: [],
+    },
+    {
+        type: 'error',
+        name: 'SimpleApp__InvalidAmount',
+        inputs: [],
+    },
+    {
+        type: 'error',
+        name: 'SimpleApp__InvalidCurrency',
+        inputs: [],
+    },
+    {
+        type: 'error',
+        name: 'SimpleApp__InvalidCaller',
+        inputs: [],
+    },
+    {
+        type: 'error',
+        name: 'SimpleApp__ZeroAddress',
+        inputs: [],
     },
 ] as const
 
@@ -402,11 +428,20 @@ bot.onTip(async (handler, event) => {
             try {
                 console.log(`Sending tip attempt ${attempt}/${maxRetries} (writeContract): ${amountEth.toFixed(6)} ETH to ${userId}`)
                 
+                // Try to send currency - check if we need to use a different approach
+                console.log('Attempting writeContract with:', {
+                    address: bot.appAddress,
+                    recipient: userId,
+                    currency: zeroAddress,
+                    amount: amount.toString(),
+                })
+                
                 const hash = await writeContract(bot.viem, {
                     address: bot.appAddress,
                     abi: simpleAppAbi,
                     functionName: 'sendCurrency',
                     args: [userId, zeroAddress, amount],
+                    account: bot.viem.account, // Ensure we're using the correct account
                 })
                 
                 console.log(`Tip sent successfully via writeContract! Transaction hash: ${hash}`)
