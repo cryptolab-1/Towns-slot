@@ -1,7 +1,7 @@
 import { makeTownsBot } from '@towns-protocol/bot'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
-import { writeContract } from 'viem/actions'
+import { writeContract, getBalance } from 'viem/actions'
 import { parseEther, zeroAddress } from 'viem'
 import commands from './commands'
 import { getJackpot, setJackpot } from './db'
@@ -367,37 +367,67 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(event.channelId, summary)
     }
 
-    // Helper function to send tip using writeContract (SimpleAccount)
+    // Helper function to send tip - try handler.sendTip first, fallback to writeContract
     async function sendTipWithRetry(
         userId: `0x${string}`,
         amount: bigint,
+        messageId: string,
+        channelId: string,
         maxRetries = 3,
     ): Promise<boolean> {
         const amountEth = Number(amount) / 1e18
         
+        // Check balance before attempting to send
+        try {
+            const balance = await getBalance(bot.viem, { address: bot.appAddress })
+            console.log(`Bot balance: ${(Number(balance) / 1e18).toFixed(6)} ETH, Required: ${amountEth.toFixed(6)} ETH`)
+            
+            if (balance < amount) {
+                console.error(`Insufficient balance! Have ${(Number(balance) / 1e18).toFixed(6)} ETH, need ${amountEth.toFixed(6)} ETH`)
+                return false
+            }
+        } catch (error) {
+            console.error('Error checking balance:', error)
+        }
+        
+        // Try handler.sendTip first (recommended method)
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                console.log(`Sending tip attempt ${attempt}/${maxRetries}: ${amountEth.toFixed(6)} ETH to ${userId}`)
+                console.log(`Sending tip attempt ${attempt}/${maxRetries} (handler.sendTip): ${amountEth.toFixed(6)} ETH to ${userId}`)
                 
-                // Use writeContract with SimpleAccount sendCurrency function
-                // amount is already in Wei, so we pass it directly
-                const hash = await writeContract(bot.viem, {
-                    address: bot.appAddress,
-                    abi: simpleAppAbi,
-                    functionName: 'sendCurrency',
-                    args: [userId, zeroAddress, amount],
+                await handler.sendTip({
+                    userId,
+                    amount,
+                    messageId,
+                    channelId,
                 })
                 
-                console.log(`Tip sent successfully! Transaction hash: ${hash}`)
+                console.log(`Tip sent successfully via handler.sendTip!`)
                 return true
-            } catch (error) {
-                console.error(`Tip send attempt ${attempt}/${maxRetries} failed:`, error)
+            } catch (error: any) {
+                console.error(`handler.sendTip attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
+                
+                // If handler.sendTip fails, try writeContract as fallback
+                if (attempt === maxRetries) {
+                    console.log('Trying writeContract as fallback...')
+                    try {
+                        const hash = await writeContract(bot.viem, {
+                            address: bot.appAddress,
+                            abi: simpleAppAbi,
+                            functionName: 'sendCurrency',
+                            args: [userId, zeroAddress, amount],
+                        })
+                        console.log(`Tip sent successfully via writeContract! Transaction hash: ${hash}`)
+                        return true
+                    } catch (writeError: any) {
+                        console.error('writeContract also failed:', writeError?.message || writeError)
+                        return false
+                    }
+                }
+                
                 if (attempt < maxRetries) {
                     // Wait before retry (exponential backoff)
                     await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
-                } else {
-                    console.error(`Failed to send tip after ${maxRetries} attempts:`, error)
-                    return false
                 }
             }
         }
@@ -433,6 +463,8 @@ bot.onTip(async (handler, event) => {
                 const feePayoutSuccess = await sendTipWithRetry(
                     DEPLOYER_ADDRESS,
                     totalFee,
+                    event.messageId,
+                    event.channelId,
                 )
 
                 if (!feePayoutSuccess) {
