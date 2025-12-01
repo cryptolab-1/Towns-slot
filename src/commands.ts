@@ -9,7 +9,11 @@ const commands = [
     },
     {
         name: 'slot',
-        description: 'Play the slot machine (tip $0.10 to play)',
+        description: 'Play the slot machine (tip $0.25 per game)',
+    },
+    {
+        name: 'claim',
+        description: 'Claim your pending winnings',
     },
 ] as const satisfies PlainMessage<SlashCommand>[]
 

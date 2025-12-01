@@ -6,42 +6,67 @@ const dbPath = process.env.DATABASE_PATH || join(process.cwd(), 'jackpot.json')
 interface JackpotData {
     amount: string // Store as string to preserve BigInt precision
     updated_at: number
+    pendingPayouts: Record<string, string> // userId -> amount in Wei (string)
 }
 
-function readJackpot(): JackpotData {
+function readDatabase(): JackpotData {
     if (existsSync(dbPath)) {
         try {
             const data = readFileSync(dbPath, 'utf-8')
-            return JSON.parse(data) as JackpotData
+            const parsed = JSON.parse(data) as JackpotData
+            // Ensure pendingPayouts exists
+            if (!parsed.pendingPayouts) {
+                parsed.pendingPayouts = {}
+            }
+            return parsed
         } catch (error) {
-            console.error('Error reading jackpot database:', error)
-            return { amount: '0', updated_at: Date.now() }
+            console.error('Error reading database:', error)
+            return { amount: '0', updated_at: Date.now(), pendingPayouts: {} }
         }
     }
-    return { amount: '0', updated_at: Date.now() }
+    return { amount: '0', updated_at: Date.now(), pendingPayouts: {} }
 }
 
-function writeJackpot(data: JackpotData): void {
+function writeDatabase(data: JackpotData): void {
     try {
         writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf-8')
     } catch (error) {
-        console.error('Error writing jackpot database:', error)
+        console.error('Error writing database:', error)
     }
 }
 
 export function getJackpot(): bigint {
-    const data = readJackpot()
+    const data = readDatabase()
     return BigInt(data.amount)
 }
 
 export function setJackpot(amount: bigint): void {
-    const data: JackpotData = {
-        amount: amount.toString(),
-        updated_at: Date.now(),
-    }
-    writeJackpot(data)
+    const data = readDatabase()
+    data.amount = amount.toString()
+    data.updated_at = Date.now()
+    writeDatabase(data)
+}
+
+export function addPendingPayout(userId: string, amount: bigint): void {
+    const data = readDatabase()
+    const currentAmount = BigInt(data.pendingPayouts[userId] || '0')
+    data.pendingPayouts[userId] = (currentAmount + amount).toString()
+    data.updated_at = Date.now()
+    writeDatabase(data)
+}
+
+export function getPendingPayout(userId: string): bigint {
+    const data = readDatabase()
+    return BigInt(data.pendingPayouts[userId] || '0')
+}
+
+export function clearPendingPayout(userId: string): void {
+    const data = readDatabase()
+    delete data.pendingPayouts[userId]
+    data.updated_at = Date.now()
+    writeDatabase(data)
 }
 
 // Initialize database on first load
-const initialData = readJackpot()
+const initialData = readDatabase()
 console.log(`Jackpot loaded from database: ${(Number(initialData.amount) / 1e18).toFixed(6)} ETH`)

@@ -4,7 +4,7 @@ import { logger } from 'hono/logger'
 import { writeContract, getBalance } from 'viem/actions'
 import { parseEther, zeroAddress } from 'viem'
 import commands from './commands'
-import { getJackpot, setJackpot } from './db'
+import { getJackpot, setJackpot, addPendingPayout, getPendingPayout, clearPendingPayout } from './db'
 
 // SimpleAccount ABI for sendCurrency function (per AGENTS.md line 258)
 // Using writeContract for SimpleAccount instead of handler.sendTip (which uses ERC-7821)
@@ -191,13 +191,95 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
     commands,
 })
 
+// Helper function to send tip using writeContract (per AGENTS.md line 254-260)
+// handler.sendTip uses ERC-7821 which is not supported, so we use writeContract directly
+async function sendTipWithRetry(
+    userId: `0x${string}`,
+    amount: bigint,
+    maxRetries = 3,
+): Promise<boolean> {
+    const amountEth = Number(amount) / 1e18
+    
+    // Check balances for both wallets (per AGENTS.md line 243-244)
+    try {
+        const appBalance = await getBalance(bot.viem, { address: bot.appAddress })
+        const botIdBalance = await getBalance(bot.viem, { address: bot.botId as `0x${string}` })
+        console.log(`Bot appAddress balance: ${(Number(appBalance) / 1e18).toFixed(6)} ETH`)
+        console.log(`Bot botId (gas) balance: ${(Number(botIdBalance) / 1e18).toFixed(6)} ETH`)
+        console.log(`Required payout: ${amountEth.toFixed(6)} ETH`)
+        
+        if (appBalance < amount) {
+            console.error(`Insufficient balance in appAddress! Have ${(Number(appBalance) / 1e18).toFixed(6)} ETH, need ${amountEth.toFixed(6)} ETH`)
+            return false
+        }
+        
+        if (botIdBalance === BigInt(0)) {
+            console.warn(`Warning: botId (gas wallet) has no balance! Gas fees may fail.`)
+        }
+    } catch (error) {
+        console.error('Error checking balance:', error)
+    }
+    
+    // Use writeContract with simpleAppAbi (per AGENTS.md line 254-260)
+    // This is for SimpleAccount and doesn't require ERC-7821
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`Sending tip attempt ${attempt}/${maxRetries} (writeContract): ${amountEth.toFixed(6)} ETH to ${userId}`)
+            console.log('Contract call details:', {
+                address: bot.appAddress,
+                function: 'sendCurrency',
+                recipient: userId,
+                currency: zeroAddress,
+                amount: amount.toString(),
+            })
+            
+            const hash = await writeContract(bot.viem, {
+                address: bot.appAddress,
+                abi: simpleAppAbi,
+                functionName: 'sendCurrency',
+                args: [userId, zeroAddress, amount],
+            })
+            
+            console.log(`Tip sent successfully via writeContract! Transaction hash: ${hash}`)
+            return true
+        } catch (error: any) {
+            console.error(`writeContract attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
+            console.error('Error details:', {
+                shortMessage: error?.shortMessage,
+                cause: error?.cause,
+                data: error?.data,
+                code: error?.code,
+                errorSignature: error?.data?.slice?.(0, 10), // First 4 bytes of error
+            })
+            
+            // Check if it's a known error
+            if (error?.data?.slice?.(0, 10) === '0x3c10b94e') {
+                console.error('Contract revert error 0x3c10b94e - This may indicate:')
+                console.error('1. The sendCurrency function requires specific permissions')
+                console.error('2. The contract may not support direct currency transfers')
+                console.error('3. The caller (bot.appAddress) may not be authorized')
+            }
+            
+            if (attempt < maxRetries) {
+                // Wait before retry (exponential backoff)
+                await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
+            } else {
+                console.error(`Failed to send tip after ${maxRetries} attempts`)
+                return false
+            }
+        }
+    }
+    return false
+}
+
 bot.onSlashCommand('help', async (handler, { channelId }) => {
     console.log('Help command received')
     await handler.sendMessage(
         channelId,
         '**Available Commands:**\n\n' +
             '• `/help` - Show this help message\n' +
-            '• `/slot` - Play the slot machine (tip $0.25 per game)\n\n' +
+            '• `/slot` - Play the slot machine (tip $0.25 per game)\n' +
+            '• `/claim` - Claim your pending winnings\n\n' +
             '**Message Triggers:**\n\n' +
             "• Mention me - I'll respond\n" +
             "• React with 👋 - I'll wave back" +
@@ -254,6 +336,108 @@ bot.onMessage(async (handler, { message, channelId, eventId, createdAt }) => {
 bot.onReaction(async (handler, { reaction, channelId }) => {
     if (reaction === '👋') {
         await handler.sendMessage(channelId, 'I saw your wave! 👋')
+    }
+})
+
+bot.onSlashCommand('claim', async (handler, { channelId, userId }) => {
+    console.log('Claim command received from user:', userId)
+    const pendingAmount = getPendingPayout(userId)
+    
+    if (pendingAmount === BigInt(0)) {
+        await handler.sendMessage(
+            channelId,
+            '💰 **No Pending Winnings**\n\n' +
+                'You don\'t have any pending winnings to claim.\n\n' +
+                'Play the slot machine with `/slot` to win! 🎰',
+        )
+        return
+    }
+    
+    const pendingEth = (Number(pendingAmount) / 1e18).toFixed(6)
+    
+    // Send claim button
+    const { hexToBytes } = await import('viem')
+    await handler.sendInteractionRequest(
+        channelId,
+        {
+            case: 'form',
+            value: {
+                id: `claim-${userId}`,
+                title: 'Claim Your Winnings',
+                components: [
+                    {
+                        id: 'claim-btn',
+                        component: {
+                            case: 'button',
+                            value: { label: `Claim ${pendingEth} ETH` },
+                        },
+                    },
+                ],
+            },
+        },
+        hexToBytes(userId as `0x${string}`),
+    )
+    
+    await handler.sendMessage(
+        channelId,
+        `💰 **Pending Winnings: ${pendingEth} ETH**\n\n` +
+            `Click the button above to claim your winnings!`,
+    )
+})
+
+bot.onInteractionResponse(async (handler, event) => {
+    if (event.response.payload.content?.case === 'form') {
+        const form = event.response.payload.content.value
+        const requestId = form.requestId || ''
+        
+        // Check if this is a claim request
+        if (requestId.startsWith('claim-')) {
+            const userId = event.userId
+            const pendingAmount = getPendingPayout(userId)
+            
+            if (pendingAmount === BigInt(0)) {
+                await handler.sendMessage(
+                    event.channelId,
+                    '❌ **No Pending Winnings**\n\n' +
+                        'You don\'t have any pending winnings to claim.',
+                )
+                return
+            }
+            
+            // Check if claim button was clicked
+            for (const component of form.components) {
+                if (component.component.case === 'button' && component.id === 'claim-btn') {
+                    const pendingEth = (Number(pendingAmount) / 1e18).toFixed(6)
+                    
+                    // Try to send payout
+                    const payoutSuccess = await sendTipWithRetry(
+                        userId as `0x${string}`,
+                        pendingAmount,
+                    )
+                    
+                    if (payoutSuccess) {
+                        clearPendingPayout(userId)
+                        await handler.sendMessage(
+                            event.channelId,
+                            `✅ **Payout Successful!**\n\n` +
+                                `💰 You've received ${pendingEth} ETH!\n\n` +
+                                `Transaction completed. Thanks for playing! 🎰`,
+                        )
+                        console.log(`Successfully paid out ${pendingEth} ETH to ${userId}`)
+                    } else {
+                        await handler.sendMessage(
+                            event.channelId,
+                            `⚠️ **Payout Failed**\n\n` +
+                                `Sorry, I couldn't send your payout of ${pendingEth} ETH.\n\n` +
+                                `This may be due to a temporary network issue. Your winnings are still saved and you can try again later.\n\n` +
+                                `If this problem persists, please contact support.`,
+                        )
+                        console.error(`Failed to pay out ${pendingEth} ETH to ${userId}`)
+                    }
+                    return
+                }
+            }
+        }
     }
 })
 
@@ -391,129 +575,42 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(event.channelId, summary)
     }
 
-    // Helper function to send tip using writeContract (per AGENTS.md line 254-260)
-    // handler.sendTip uses ERC-7821 which is not supported, so we use writeContract directly
-    async function sendTipWithRetry(
-        userId: `0x${string}`,
-        amount: bigint,
-        maxRetries = 3,
-    ): Promise<boolean> {
-        const amountEth = Number(amount) / 1e18
-        
-        // Check balances for both wallets (per AGENTS.md line 243-244)
-        try {
-            const appBalance = await getBalance(bot.viem, { address: bot.appAddress })
-            const botIdBalance = await getBalance(bot.viem, { address: bot.botId as `0x${string}` })
-            console.log(`Bot appAddress balance: ${(Number(appBalance) / 1e18).toFixed(6)} ETH`)
-            console.log(`Bot botId (gas) balance: ${(Number(botIdBalance) / 1e18).toFixed(6)} ETH`)
-            console.log(`Required payout: ${amountEth.toFixed(6)} ETH`)
-            
-            if (appBalance < amount) {
-                console.error(`Insufficient balance in appAddress! Have ${(Number(appBalance) / 1e18).toFixed(6)} ETH, need ${amountEth.toFixed(6)} ETH`)
-                return false
-            }
-            
-            if (botIdBalance === BigInt(0)) {
-                console.warn(`Warning: botId (gas wallet) has no balance! Gas fees may fail.`)
-            }
-        } catch (error) {
-            console.error('Error checking balance:', error)
-        }
-        
-        // Use writeContract with simpleAppAbi (per AGENTS.md line 254-260)
-        // This is for SimpleAccount and doesn't require ERC-7821
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                console.log(`Sending tip attempt ${attempt}/${maxRetries} (writeContract): ${amountEth.toFixed(6)} ETH to ${userId}`)
-                console.log('Contract call details:', {
-                    address: bot.appAddress,
-                    function: 'sendCurrency',
-                    recipient: userId,
-                    currency: zeroAddress,
-                    amount: amount.toString(),
-                })
-                
-                const hash = await writeContract(bot.viem, {
-                    address: bot.appAddress,
-                    abi: simpleAppAbi,
-                    functionName: 'sendCurrency',
-                    args: [userId, zeroAddress, amount],
-                })
-                
-                console.log(`Tip sent successfully via writeContract! Transaction hash: ${hash}`)
-                return true
-            } catch (error: any) {
-                console.error(`writeContract attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
-                console.error('Error details:', {
-                    shortMessage: error?.shortMessage,
-                    cause: error?.cause,
-                    data: error?.data,
-                    code: error?.code,
-                    errorSignature: error?.data?.slice?.(0, 10), // First 4 bytes of error
-                })
-                
-                // Check if it's a known error
-                if (error?.data?.slice?.(0, 10) === '0x3c10b94e') {
-                    console.error('Contract revert error 0x3c10b94e - This may indicate:')
-                    console.error('1. The sendCurrency function requires specific permissions')
-                    console.error('2. The contract may not support direct currency transfers')
-                    console.error('3. The caller (bot.appAddress) may not be authorized')
-                }
-                
-                if (attempt < maxRetries) {
-                    // Wait before retry (exponential backoff)
-                    await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
-                } else {
-                    console.error(`Failed to send tip after ${maxRetries} attempts`)
-                    return false
-                }
-            }
-        }
-        return false
-    }
-
-    // Send total payout to winner (if any winnings)
+    // Store winnings as pending payout instead of sending automatically
     if (totalPayout > 0) {
-        const winnerPayoutSuccess = await sendTipWithRetry(
-            event.senderAddress as `0x${string}`,
-            totalPayout,
+        addPendingPayout(event.senderAddress, totalPayout)
+        const payoutEth = (Number(totalPayout) / 1e18).toFixed(6)
+        
+        await handler.sendMessage(
+            event.channelId,
+            `🎉 **You won ${payoutEth} ETH!**\n\n` +
+                `💰 **Your winnings have been added to your account!**\n\n` +
+                `Use \`/claim\` to claim your winnings, or click the button below!`,
         )
-
-        if (!winnerPayoutSuccess) {
-            // If payout fails, add the amounts back to jackpot
-            jackpot += totalWinnings
-            setJackpot(jackpot)
-            const payoutEth = (Number(totalPayout) / 1e18).toFixed(6)
-            await handler.sendMessage(
-                event.channelId,
-                `⚠️ **Payout Error**\n\n` +
-                    `Sorry, I couldn't send your payout of ${payoutEth} ETH automatically.\n\n` +
-                    `**Your winnings:** ${payoutEth} ETH\n` +
-                    `**Your address:** ${event.senderAddress}\n\n` +
-                    `Your winnings have been returned to the jackpot. Please contact the bot administrator to receive your payout manually.\n\n` +
-                    `The bot's contract may not support automatic payouts. This is a known issue we're working to resolve.`,
-            )
-            console.error('Failed to send winner payout, jackpot restored')
-            console.error(`Manual payout required: ${payoutEth} ETH to ${event.senderAddress}`)
-            return
-        }
-
-        // Send total fee to deployer (10% of total winnings) - only if winner payout succeeded
-        if (DEPLOYER_ADDRESS && totalWinnings > 0) {
-            const totalFee = totalWinnings - totalPayout
-            if (totalFee > 0) {
-                const feePayoutSuccess = await sendTipWithRetry(
-                    DEPLOYER_ADDRESS,
-                    totalFee,
-                )
-
-                if (!feePayoutSuccess) {
-                    // If fee payout fails, log but don't fail the whole transaction
-                    console.error('Failed to send deployer fee, but winner payout succeeded')
-                    // Optionally, we could add the fee back to jackpot or handle it differently
-                }
-            }
-        }
+        
+        // Send claim button
+        const { hexToBytes } = await import('viem')
+        await handler.sendInteractionRequest(
+            event.channelId,
+            {
+                case: 'form',
+                value: {
+                    id: `claim-${event.senderAddress}`,
+                    title: 'Claim Your Winnings',
+                    components: [
+                        {
+                            id: 'claim-btn',
+                            component: {
+                                case: 'button',
+                                value: { label: `Claim ${payoutEth} ETH` },
+                            },
+                        },
+                    ],
+                },
+            },
+            hexToBytes(event.senderAddress as `0x${string}`),
+        )
+        
+        console.log(`Added ${payoutEth} ETH to pending payouts for ${event.senderAddress}`)
     }
 })
 const { jwtMiddleware, handler } = bot.start()
