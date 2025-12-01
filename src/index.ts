@@ -400,14 +400,21 @@ bot.onTip(async (handler, event) => {
     ): Promise<boolean> {
         const amountEth = Number(amount) / 1e18
         
-        // Check balance before attempting to send
+        // Check balances for both wallets (per AGENTS.md line 243-244)
         try {
-            const balance = await getBalance(bot.viem, { address: bot.appAddress })
-            console.log(`Bot balance: ${(Number(balance) / 1e18).toFixed(6)} ETH, Required: ${amountEth.toFixed(6)} ETH`)
+            const appBalance = await getBalance(bot.viem, { address: bot.appAddress })
+            const botIdBalance = await getBalance(bot.viem, { address: bot.botId })
+            console.log(`Bot appAddress balance: ${(Number(appBalance) / 1e18).toFixed(6)} ETH`)
+            console.log(`Bot botId (gas) balance: ${(Number(botIdBalance) / 1e18).toFixed(6)} ETH`)
+            console.log(`Required payout: ${amountEth.toFixed(6)} ETH`)
             
-            if (balance < amount) {
-                console.error(`Insufficient balance! Have ${(Number(balance) / 1e18).toFixed(6)} ETH, need ${amountEth.toFixed(6)} ETH`)
+            if (appBalance < amount) {
+                console.error(`Insufficient balance in appAddress! Have ${(Number(appBalance) / 1e18).toFixed(6)} ETH, need ${amountEth.toFixed(6)} ETH`)
                 return false
+            }
+            
+            if (botIdBalance === BigInt(0)) {
+                console.warn(`Warning: botId (gas wallet) has no balance! Gas fees may fail.`)
             }
         } catch (error) {
             console.error('Error checking balance:', error)
@@ -418,6 +425,13 @@ bot.onTip(async (handler, event) => {
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 console.log(`Sending tip attempt ${attempt}/${maxRetries} (writeContract): ${amountEth.toFixed(6)} ETH to ${userId}`)
+                console.log('Contract call details:', {
+                    address: bot.appAddress,
+                    function: 'sendCurrency',
+                    recipient: userId,
+                    currency: zeroAddress,
+                    amount: amount.toString(),
+                })
                 
                 const hash = await writeContract(bot.viem, {
                     address: bot.appAddress,
@@ -435,7 +449,16 @@ bot.onTip(async (handler, event) => {
                     cause: error?.cause,
                     data: error?.data,
                     code: error?.code,
+                    errorSignature: error?.data?.slice?.(0, 10), // First 4 bytes of error
                 })
+                
+                // Check if it's a known error
+                if (error?.data?.slice?.(0, 10) === '0x3c10b94e') {
+                    console.error('Contract revert error 0x3c10b94e - This may indicate:')
+                    console.error('1. The sendCurrency function requires specific permissions')
+                    console.error('2. The contract may not support direct currency transfers')
+                    console.error('3. The caller (bot.appAddress) may not be authorized')
+                }
                 
                 if (attempt < maxRetries) {
                     // Wait before retry (exponential backoff)
