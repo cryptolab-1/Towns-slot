@@ -23,11 +23,6 @@ async function getEthPrice(): Promise<number> {
     // List of APIs to try in order (with fallbacks)
     const apis = [
         {
-            name: 'Binance',
-            url: 'https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT',
-            parse: (data: any) => parseFloat(data.price),
-        },
-        {
             name: 'Coinbase',
             url: 'https://api.coinbase.com/v2/exchange-rates?currency=ETH',
             parse: (data: any) => parseFloat(data.data.rates.USD),
