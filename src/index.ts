@@ -251,13 +251,26 @@ bot.onTip(async (handler, event) => {
     const receivedEth = Number(event.amount) / 1e18
     const receivedDollars = receivedEth * ethPrice
 
-    // Check if tip amount is a multiple of entry fee
-    // Allow small tolerance for price fluctuations (within 2%)
-    const tolerance = entryFeeWei / BigInt(50) // 2% tolerance
-    const remainder = event.amount % entryFeeWei
-    const isMultiple = remainder <= tolerance || remainder >= entryFeeWei - tolerance
+    // Check if tip amount is valid with 10% slippage tolerance
+    // Calculate expected number of games
+    const expectedGames = Number(event.amount) / Number(entryFeeWei)
+    const numGames = Math.max(1, Math.round(expectedGames))
     
-    if (event.amount < entryFeeWei - tolerance || !isMultiple) {
+    // Calculate expected amount for this number of games
+    const expectedAmount = entryFeeWei * BigInt(numGames)
+    const difference = event.amount > expectedAmount 
+        ? event.amount - expectedAmount 
+        : expectedAmount - event.amount
+    
+    // 10% slippage tolerance per game (scales with number of games)
+    const tolerancePerGame = entryFeeWei / BigInt(10) // 10% tolerance per game
+    const maxTolerance = tolerancePerGame * BigInt(numGames)
+    
+    // Minimum amount check (allow 10% below for 1 game)
+    const minAmount = entryFeeWei - tolerancePerGame
+    
+    // Check if amount is too small or difference is too large
+    if (event.amount < minAmount || difference > maxTolerance) {
         await handler.sendMessage(
             event.channelId,
             `❌ Invalid tip amount!\n\n` +
@@ -265,13 +278,11 @@ bot.onTip(async (handler, event) => {
                 `Required: $${ENTRY_FEE_DOLLARS.toFixed(2)} (${entryFeeEth.toFixed(6)} ETH) per game\n\n` +
                 `Tip must be a multiple of $${ENTRY_FEE_DOLLARS.toFixed(2)} to play! 🎰\n` +
                 `Examples: $${ENTRY_FEE_DOLLARS.toFixed(2)} (1 game), $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} (4 games)\n` +
-                `💵 Current ETH Price: $${ethPrice.toFixed(2)}`,
+                `💵 Current ETH Price: $${ethPrice.toFixed(2)}\n` +
+                `📊 10% slippage tolerance applied`,
         )
         return
     }
-
-    // Calculate number of games (round to nearest)
-    const numGames = Math.round(Number(event.amount) / Number(entryFeeWei))
     
     // Calculate actual entry fee used (based on number of games)
     const actualEntryFee = entryFeeWei * BigInt(numGames)
