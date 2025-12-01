@@ -4,31 +4,10 @@ import { logger } from 'hono/logger'
 import { writeContract, getBalance } from 'viem/actions'
 import { parseEther, zeroAddress } from 'viem'
 import commands from './commands'
-
-// Try to import simpleAppAbi from the package
-let simpleAppAbi: any
-try {
-    simpleAppAbi = await import('@towns-protocol/bot/simpleAppAbi')
-} catch (error) {
-    console.warn('Could not import simpleAppAbi from package, using fallback ABI')
-    // Fallback ABI
-    simpleAppAbi = [
-        {
-            inputs: [
-                { name: 'recipient', type: 'address' },
-                { name: 'currency', type: 'address' },
-                { name: 'amount', type: 'uint256' },
-            ],
-            name: 'sendCurrency',
-            outputs: [],
-            stateMutability: 'nonpayable',
-            type: 'function',
-        },
-    ] as const
-}
 import { getJackpot, setJackpot } from './db'
 
-// SimpleAccount ABI for sendCurrency function with error definitions
+// SimpleAccount ABI for sendCurrency function (per AGENTS.md line 258)
+// Using writeContract for SimpleAccount instead of handler.sendTip (which uses ERC-7821)
 const simpleAppAbi = [
     {
         inputs: [
@@ -40,32 +19,6 @@ const simpleAppAbi = [
         outputs: [],
         stateMutability: 'nonpayable',
         type: 'function',
-    },
-    // Error definitions
-    {
-        type: 'error',
-        name: 'SimpleApp__InvalidAddressInput',
-        inputs: [],
-    },
-    {
-        type: 'error',
-        name: 'SimpleApp__InvalidAmount',
-        inputs: [],
-    },
-    {
-        type: 'error',
-        name: 'SimpleApp__InvalidCurrency',
-        inputs: [],
-    },
-    {
-        type: 'error',
-        name: 'SimpleApp__InvalidCaller',
-        inputs: [],
-    },
-    {
-        type: 'error',
-        name: 'SimpleApp__ZeroAddress',
-        inputs: [],
     },
 ] as const
 
