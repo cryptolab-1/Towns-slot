@@ -375,12 +375,11 @@ bot.onSlashCommand('claim', async (handler, { channelId, userId }) => {
     
     const pendingEth = (Number(pendingAmount) / 1e18).toFixed(6)
     
-    // Send claim button
-    const { hexToBytes } = await import('viem')
-    await handler.sendInteractionRequest(
-        channelId,
-        {
-            case: 'form',
+    // Send claim button first, then message
+    try {
+        const { hexToBytes } = await import('viem')
+        const interactionPayload = {
+            case: 'form' as const,
             value: {
                 id: `claim-${userWalletAddress}`,
                 title: 'Claim Your Winnings',
@@ -388,21 +387,39 @@ bot.onSlashCommand('claim', async (handler, { channelId, userId }) => {
                     {
                         id: 'claim-btn',
                         component: {
-                            case: 'button',
+                            case: 'button' as const,
                             value: { label: `Claim ${pendingEth} ETH` },
                         },
                     },
                 ],
             },
-        },
-        hexToBytes(userWalletAddress as `0x${string}`),
-    )
-    
-    await handler.sendMessage(
-        channelId,
-        `💰 **Pending Winnings: ${pendingEth} ETH**\n\n` +
-            `Click the button above to claim your winnings!`,
-    )
+        }
+        
+        console.log(`Sending interaction request for ${userWalletAddress}:`, JSON.stringify(interactionPayload, null, 2))
+        
+        await handler.sendInteractionRequest(
+            channelId,
+            interactionPayload,
+            hexToBytes(userWalletAddress as `0x${string}`),
+        )
+        
+        console.log(`Successfully sent claim button for ${userWalletAddress} with amount ${pendingEth} ETH`)
+        
+        // Send message after button
+        await handler.sendMessage(
+            channelId,
+            `💰 **Pending Winnings: ${pendingEth} ETH**\n\n` +
+                `Click the button above to claim your winnings!`,
+        )
+    } catch (error) {
+        console.error('Error sending interaction request:', error)
+        // Fallback: send message without button
+        await handler.sendMessage(
+            channelId,
+            `💰 **Pending Winnings: ${pendingEth} ETH**\n\n` +
+                `⚠️ Could not display claim button. Please try using \`/claim\` again or contact support.`,
+        )
+    }
 })
 
 bot.onInteractionResponse(async (handler, event) => {
