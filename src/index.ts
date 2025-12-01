@@ -424,9 +424,8 @@ bot.onTip(async (handler, event) => {
     // Calculate actual entry fee used (based on number of games)
     const actualEntryFee = entryFeeWei * BigInt(numGames)
 
-    // Jackpot is the actual wallet balance (bot.appAddress)
-    // Entry fees are automatically added to the wallet when users tip
-    // So we just read the current balance as the jackpot
+    // Get initial jackpot from wallet balance
+    // We'll track this locally and reduce it after each win
     let jackpot = await getBalance(bot.viem, { address: bot.appAddress })
 
     // Track total winnings and payouts across all games
@@ -437,6 +436,9 @@ bot.onTip(async (handler, event) => {
 
     // Play multiple games
     for (let gameNum = 1; gameNum <= numGames; gameNum++) {
+        // Use the current jackpot (which may have been reduced by previous wins)
+        const currentJackpot = jackpot
+        
         // Spin the slot machine!
         const symbols = spinSlotMachine()
         const winnings = calculateWinnings(symbols)
@@ -447,11 +449,9 @@ bot.onTip(async (handler, event) => {
         let hasFee = false
 
         if (winnings.percentage > 0) {
-            // Always read current jackpot from wallet balance before calculating payout
-            jackpot = await getBalance(bot.viem, { address: bot.appAddress })
-            // Calculate percentage of jackpot
+            // Calculate percentage of current jackpot
             const percentageMultiplier = BigInt(winnings.percentage)
-            payoutAmount = (jackpot * percentageMultiplier) / BigInt(100)
+            payoutAmount = (currentJackpot * percentageMultiplier) / BigInt(100)
 
             // Calculate fee (10% of payout goes to deployer, if deployer address is set)
             let feeAmount = BigInt(0)
@@ -464,16 +464,19 @@ bot.onTip(async (handler, event) => {
                 totalDeployerFee += feeAmount
             }
 
-            // Note: We don't update jackpot here because it's the actual wallet balance
-            // The wallet balance will decrease automatically when we send payouts
+            // Reduce jackpot by the full payout amount for the next game
+            // This ensures subsequent games use the reduced jackpot
+            // Note: We reduce by payoutAmount (not winnerPayout) because the full amount
+            // comes out of the jackpot, even though some goes to the deployer as a fee
+            jackpot -= payoutAmount
 
             // Accumulate totals
             totalWinnings += payoutAmount
             totalPayout += winnerPayout
         }
 
-        // Format and store result for this game
-        const result = formatSlotResult(symbols, winnings, jackpot, winnerPayout, hasFee, gameNum, numGames)
+        // Format and store result for this game (use the jackpot that was used for calculation)
+        const result = formatSlotResult(symbols, winnings, currentJackpot, winnerPayout, hasFee, gameNum, numGames)
         gameResults.push(result)
     }
 
