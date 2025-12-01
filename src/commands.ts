@@ -4,10 +4,6 @@ import type { PlainMessage, SlashCommand } from '@towns-protocol/proto'
 // and will be available in the slash command autocomplete.
 const commands = [
     {
-        name: 'help',
-        description: 'Get help with bot commands',
-    },
-    {
         name: 'slot',
         description: 'Play the slot machine (tip $0.25 per game)',
     },
