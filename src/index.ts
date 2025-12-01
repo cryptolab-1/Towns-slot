@@ -290,10 +290,24 @@ bot.onTip(async (handler, event) => {
         channelId: event.channelId,
         messageId: event.messageId,
         userId: event.userId,
+        spaceId: event.spaceId,
     })
     
     // Check if tip is to the bot
     if (event.receiverAddress !== bot.appAddress) {
+        return
+    }
+    
+    // Validate required fields for sendTip
+    if (!event.channelId || !event.messageId) {
+        console.error('Missing required fields for sendTip:', {
+            channelId: event.channelId,
+            messageId: event.messageId,
+        })
+        await handler.sendMessage(
+            event.channelId || event.spaceId, // Fallback to spaceId if channelId missing
+            '⚠️ Error: Missing channel information. Cannot process payout.',
+        )
         return
     }
 
@@ -402,10 +416,13 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(event.channelId, summary)
     }
 
-    // Helper function to send tip - use writeContract directly since handler.sendTip has issues
+    // Helper function to send tip using handler.sendTip (per AGENTS.md)
     async function sendTipWithRetry(
+        handler: any,
         userId: `0x${string}`,
         amount: bigint,
+        messageId: string,
+        channelId: string,
         maxRetries = 3,
     ): Promise<boolean> {
         const amountEth = Number(amount) / 1e18
@@ -423,35 +440,32 @@ bot.onTip(async (handler, event) => {
             console.error('Error checking balance:', error)
         }
         
-        // Use writeContract directly (handler.sendTip has channelId issues)
+        // Use handler.sendTip as per AGENTS.md (requires gas in bot.botId)
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                console.log(`Sending tip attempt ${attempt}/${maxRetries} (writeContract): ${amountEth.toFixed(6)} ETH to ${userId}`)
-                
-                // Try to send currency - check if we need to use a different approach
-                console.log('Attempting writeContract with:', {
-                    address: bot.appAddress,
-                    recipient: userId,
-                    currency: zeroAddress,
+                console.log(`Sending tip attempt ${attempt}/${maxRetries} (handler.sendTip): ${amountEth.toFixed(6)} ETH to ${userId}`)
+                console.log('Tip parameters:', {
+                    userId,
                     amount: amount.toString(),
+                    messageId,
+                    channelId,
                 })
                 
-                const hash = await writeContract(bot.viem, {
-                    address: bot.appAddress,
-                    abi: simpleAppAbi,
-                    functionName: 'sendCurrency',
-                    args: [userId, zeroAddress, amount],
-                    account: bot.viem.account, // Ensure we're using the correct account
+                await handler.sendTip({
+                    userId,
+                    amount,
+                    messageId,
+                    channelId,
                 })
                 
-                console.log(`Tip sent successfully via writeContract! Transaction hash: ${hash}`)
+                console.log(`Tip sent successfully via handler.sendTip!`)
                 return true
             } catch (error: any) {
-                console.error(`writeContract attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
+                console.error(`handler.sendTip attempt ${attempt}/${maxRetries} failed:`, error?.message || error)
                 console.error('Error details:', {
                     shortMessage: error?.shortMessage,
                     cause: error?.cause,
-                    data: error?.data,
+                    stack: error?.stack,
                 })
                 
                 if (attempt < maxRetries) {
@@ -469,8 +483,11 @@ bot.onTip(async (handler, event) => {
     // Send total payout to winner (if any winnings)
     if (totalPayout > 0) {
         const winnerPayoutSuccess = await sendTipWithRetry(
+            handler,
             event.senderAddress as `0x${string}`,
             totalPayout,
+            event.messageId,
+            event.channelId,
         )
 
         if (!winnerPayoutSuccess) {
@@ -493,8 +510,11 @@ bot.onTip(async (handler, event) => {
             const totalFee = totalWinnings - totalPayout
             if (totalFee > 0) {
                 const feePayoutSuccess = await sendTipWithRetry(
+                    handler,
                     DEPLOYER_ADDRESS,
                     totalFee,
+                    event.messageId,
+                    event.channelId,
                 )
 
                 if (!feePayoutSuccess) {
