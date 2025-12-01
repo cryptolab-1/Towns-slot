@@ -1,7 +1,24 @@
 import { makeTownsBot } from '@towns-protocol/bot'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
+import { writeContract } from 'viem/actions'
+import { parseEther, zeroAddress } from 'viem'
 import commands from './commands'
+
+// SimpleAccount ABI for sendCurrency function
+const simpleAppAbi = [
+    {
+        inputs: [
+            { name: 'recipient', type: 'address' },
+            { name: 'currency', type: 'address' },
+            { name: 'amount', type: 'uint256' },
+        ],
+        name: 'sendCurrency',
+        outputs: [],
+        stateMutability: 'nonpayable',
+        type: 'function',
+    },
+] as const
 
 // Slot machine symbols
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '🎰'] as const
@@ -347,22 +364,28 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(event.channelId, summary)
     }
 
-    // Helper function to send tip with retry
+    // Helper function to send tip using writeContract (SimpleAccount)
     async function sendTipWithRetry(
         userId: `0x${string}`,
         amount: bigint,
-        messageId: string,
-        channelId: string,
         maxRetries = 3,
     ): Promise<boolean> {
+        const amountEth = Number(amount) / 1e18
+        
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                await handler.sendTip({
-                    userId,
-                    amount,
-                    messageId,
-                    channelId,
+                console.log(`Sending tip attempt ${attempt}/${maxRetries}: ${amountEth.toFixed(6)} ETH to ${userId}`)
+                
+                // Use writeContract with SimpleAccount sendCurrency function
+                // amount is already in Wei, so we pass it directly
+                const hash = await writeContract(bot.viem, {
+                    address: bot.appAddress,
+                    abi: simpleAppAbi,
+                    functionName: 'sendCurrency',
+                    args: [userId, zeroAddress, amount],
                 })
+                
+                console.log(`Tip sent successfully! Transaction hash: ${hash}`)
                 return true
             } catch (error) {
                 console.error(`Tip send attempt ${attempt}/${maxRetries} failed:`, error)
@@ -381,10 +404,8 @@ bot.onTip(async (handler, event) => {
     // Send total payout to winner (if any winnings)
     if (totalPayout > 0) {
         const winnerPayoutSuccess = await sendTipWithRetry(
-            event.senderAddress,
+            event.senderAddress as `0x${string}`,
             totalPayout,
-            event.messageId,
-            event.channelId,
         )
 
         if (!winnerPayoutSuccess) {
@@ -408,8 +429,6 @@ bot.onTip(async (handler, event) => {
                 const feePayoutSuccess = await sendTipWithRetry(
                     DEPLOYER_ADDRESS,
                     totalFee,
-                    event.messageId,
-                    event.channelId,
                 )
 
                 if (!feePayoutSuccess) {
