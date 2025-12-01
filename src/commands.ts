@@ -11,6 +11,10 @@ const commands = [
         name: 'slot',
         description: 'Play the slot machine (tip $0.25 per game)',
     },
+    {
+        name: 'jackpot',
+        description: 'Check the current jackpot value',
+    },
 ] as const satisfies PlainMessage<SlashCommand>[]
 
 export default commands

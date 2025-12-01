@@ -239,6 +239,47 @@ bot.onSlashCommand('help', async (handler, { channelId }) => {
     console.log('Help command response sent')
 })
 
+bot.onSlashCommand('jackpot', async (handler, { channelId }) => {
+    console.log('Jackpot command received')
+    
+    try {
+        // Get jackpot from actual wallet balance (bot.appAddress)
+        const jackpot = await getBalance(bot.viem, { address: bot.appAddress })
+        const jackpotEth = Number(jackpot) / 1e18
+        
+        // Fetch current ETH price to show USD value
+        let ethPrice: number
+        try {
+            ethPrice = await getEthPrice()
+        } catch (error) {
+            console.error('Failed to fetch ETH price:', error)
+            // Still show jackpot in ETH even if price fetch fails
+            await handler.sendMessage(
+                channelId,
+                `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n\n` +
+                    `⚠️ Unable to fetch USD value at this time.`,
+            )
+            return
+        }
+        
+        const jackpotDollars = jackpotEth * ethPrice
+        
+        await handler.sendMessage(
+            channelId,
+            `💰 **Current Jackpot:**\n\n` +
+                `**${jackpotEth.toFixed(6)} ETH**\n` +
+                `**$${jackpotDollars.toFixed(2)} USD**\n\n` +
+                `💵 Current ETH Price: $${ethPrice.toFixed(2)}`,
+        )
+    } catch (error) {
+        console.error('Error fetching jackpot:', error)
+        await handler.sendMessage(
+            channelId,
+            '⚠️ **Error:** Unable to fetch jackpot value. Please try again in a moment.',
+        )
+    }
+})
+
 bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     console.log('Slot command received from user:', userId)
     
