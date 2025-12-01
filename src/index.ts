@@ -520,15 +520,17 @@ bot.onTip(async (handler, event) => {
     if (totalPayout > 0) {
         const payoutEth = (Number(totalPayout) / 1e18).toFixed(6)
         
-        await handler.sendMessage(
+        // Send a message first, then tip on that message
+        // This ensures we have a valid messageId to tip on
+        const { eventId: payoutMessageId } = await handler.sendMessage(
             event.channelId,
             `🎉 **You won ${payoutEth} ETH!**\n\n` +
                 `💰 **Sending your winnings now...**`,
         )
         
         // Attempt to send payout automatically using handler.sendTip()
-        // Need messageId and channelId from the tip event
-        if (!event.messageId || !event.channelId) {
+        // Use the messageId from the message we just sent
+        if (!payoutMessageId || !event.channelId) {
             console.error('Missing messageId or channelId for payout')
             await handler.sendMessage(
                 event.channelId || event.spaceId,
@@ -542,7 +544,7 @@ bot.onTip(async (handler, event) => {
         const payoutSuccess = await sendTipWithRetry(
             handler,
             event.senderAddress,
-            event.messageId,
+            payoutMessageId,
             event.channelId,
             totalPayout,
         )
@@ -557,6 +559,7 @@ bot.onTip(async (handler, event) => {
             console.log(`Successfully paid out ${payoutEth} ETH to ${event.senderAddress}`)
             
             // Send deployer fee if applicable
+            // Use the same messageId for the deployer fee
             if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
                 const deployerFeeEth = (Number(totalDeployerFee) / 1e18).toFixed(6)
                 console.log(`Sending deployer fee: ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
@@ -564,7 +567,7 @@ bot.onTip(async (handler, event) => {
                 const feeSuccess = await sendTipWithRetry(
                     handler,
                     DEPLOYER_ADDRESS,
-                    event.messageId,
+                    payoutMessageId,
                     event.channelId,
                     totalDeployerFee,
                 )
