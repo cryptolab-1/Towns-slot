@@ -1,8 +1,10 @@
 import { makeTownsBot } from '@towns-protocol/bot'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
-import { getBalance } from 'viem/actions'
+import { getBalance, waitForTransactionReceipt } from 'viem/actions'
 import { formatEther } from 'viem'
+import { execute } from 'viem/experimental/erc7821'
+import { getSmartAccountFromUserId } from '@towns-protocol/bot'
 import commands from './commands'
 // Removed database jackpot - now using wallet balance directly
 
@@ -455,34 +457,64 @@ bot.onTip(async (handler, event) => {
         const payoutEth = formatEther(totalPayout)
         
         try {
-            // ✅ CORRECT - Direct tip to winner using original tip message
-            const result = await handler.sendTip({
-                userId: event.userId,        // ✅ Winner's Towns userId
-                amount: totalPayout,         // ✅ Amount in wei (bigint)
-                messageId: event.messageId,  // ✅ Use the ORIGINAL tip message (not bot's message)
-                channelId: event.channelId   // ✅ Channel ID
+            // Get winner's wallet address
+            const winnerWallet = await getSmartAccountFromUserId(bot, { 
+                userId: event.userId 
             })
             
-            console.log(`✅ Payout sent! ${payoutEth} ETH to ${event.userId}`)
-            console.log(`   Transaction: ${result.txHash}`)
+            if (!winnerWallet) {
+                throw new Error('Could not find winner wallet')
+            }
             
-            // Now send success message AFTER the tip
+            // Send payout using execute() - THE FIX: Add account parameter!
+            const paymentHash = await execute(bot.viem, {
+                address: bot.appAddress as `0x${string}`,
+                account: bot.viem.account,  // ← This fixes the ERC-7821 error!
+                calls: [{
+                    to: winnerWallet as `0x${string}`,
+                    value: totalPayout,
+                    data: '0x' as `0x${string}`
+                }]
+            })
+            
+            // Wait for transaction confirmation
+            await waitForTransactionReceipt(bot.viem, { hash: paymentHash })
+            
+            console.log(`✅ Payout sent! ${payoutEth} ETH to ${event.userId}`)
+            console.log(`   Transaction: ${paymentHash}`)
+            
+            // Send success message
             await handler.sendMessage(
                 event.channelId,
                 `🎉 **You won ${payoutEth} ETH!**\n\n` +
                     `💰 **Payment sent!**\n\n` +
-                    `Transaction: \`${result.txHash}\``,
+                    `Transaction: \`${paymentHash}\``,
             )
             
             // Send deployer fee if applicable
-            // NOTE: DEPLOYER_ADDRESS is a wallet address, but sendTip needs a userId
-            // For now, we'll skip deployer fee payout via sendTip since we don't have the deployer's userId
-            // The deployer fee could be handled manually or through a different mechanism
             if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
                 const deployerFeeEth = formatEther(totalDeployerFee)
-                console.log(`⚠️ Deployer fee ${deployerFeeEth} ETH calculated but not sent automatically`)
-                console.log(`   Deployer address: ${DEPLOYER_ADDRESS}`)
-                console.log(`   Note: sendTip requires userId, not wallet address. Manual payout needed.`)
+                
+                try {
+                    // Send deployer fee using execute()
+                    const deployerHash = await execute(bot.viem, {
+                        address: bot.appAddress as `0x${string}`,
+                        account: bot.viem.account,
+                        calls: [{
+                            to: DEPLOYER_ADDRESS,
+                            value: totalDeployerFee,
+                            data: '0x' as `0x${string}`
+                        }]
+                    })
+                    
+                    await waitForTransactionReceipt(bot.viem, { hash: deployerHash })
+                    
+                    console.log(`✅ Deployer fee sent! ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
+                    console.log(`   Transaction: ${deployerHash}`)
+                } catch (error) {
+                    console.error('❌ Deployer fee payment failed:', error)
+                    console.log(`⚠️ Deployer fee ${deployerFeeEth} ETH calculated but not sent`)
+                }
             }
         } catch (error) {
             console.error('❌ Payment failed:', error)
