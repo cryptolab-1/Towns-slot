@@ -103,13 +103,12 @@ const DEPLOYER_ADDRESS = process.env.DEPLOYER_ADDRESS as `0x${string}`
 // Jackpot pool (accumulates all entry fees) - always read from database when needed
 // Don't use a module-level variable to avoid sync issues
 
-// Payout percentages (of jackpot)
-// Very Conservative: Maximum jackpot growth (97.89% growth rate)
-const PAYOUT_PERCENTAGES = {
-    threeDiamonds: 100, // 100% of jackpot (JACKPOT!)
-    threeOfAKind: 20, // 20% of jackpot (reduced from 50% for faster growth)
-    twoOfAKind: 5, // 5% of jackpot (reduced from 20% for faster growth)
-    noMatch: 0, // 0% of jackpot
+// Payout structure: Fixed amounts for small wins, percentage for jackpot
+const PAYOUT_STRUCTURE = {
+    threeDiamonds: { type: 'percentage' as const, value: 100 }, // 100% of jackpot (JACKPOT!)
+    threeOfAKind: { type: 'fixed' as const, multiplier: 3 }, // 3x entry fee (fixed)
+    twoOfAKind: { type: 'fixed' as const, multiplier: 1 }, // 1x entry fee (fixed)
+    noMatch: { type: 'fixed' as const, multiplier: 0 }, // 0 (no win)
 } as const
 
 // Fee percentage (10% of payout goes to deployer)
@@ -124,19 +123,25 @@ function spinSlotMachine(): [string, string, string] {
     ]
 }
 
-function calculateWinnings(symbols: [string, string, string]): { percentage: number; message: string } {
+function calculateWinnings(symbols: [string, string, string]): { 
+    payoutType: 'fixed' | 'percentage'
+    payoutValue: number // multiplier for fixed, percentage for percentage
+    message: string 
+} {
     const [a, b, c] = symbols
 
     // Three of a kind
     if (a === b && b === c) {
         if (a === '💎') {
             return {
-                percentage: PAYOUT_PERCENTAGES.threeDiamonds,
+                payoutType: PAYOUT_STRUCTURE.threeDiamonds.type,
+                payoutValue: PAYOUT_STRUCTURE.threeDiamonds.value,
                 message: '🎉 JACKPOT! Three diamonds! 🎉',
             }
         }
         return {
-            percentage: PAYOUT_PERCENTAGES.threeOfAKind,
+            payoutType: PAYOUT_STRUCTURE.threeOfAKind.type,
+            payoutValue: PAYOUT_STRUCTURE.threeOfAKind.multiplier,
             message: `🎊 Three of a kind! ${a} ${a} ${a}`,
         }
     }
@@ -144,21 +149,23 @@ function calculateWinnings(symbols: [string, string, string]): { percentage: num
     // Two of a kind
     if (a === b || b === c || a === c) {
         return {
-            percentage: PAYOUT_PERCENTAGES.twoOfAKind,
+            payoutType: PAYOUT_STRUCTURE.twoOfAKind.type,
+            payoutValue: PAYOUT_STRUCTURE.twoOfAKind.multiplier,
             message: '✨ Two of a kind!',
         }
     }
 
     // No match
     return {
-        percentage: PAYOUT_PERCENTAGES.noMatch,
+        payoutType: PAYOUT_STRUCTURE.noMatch.type,
+        payoutValue: PAYOUT_STRUCTURE.noMatch.multiplier,
         message: '😔 No match, better luck next time!',
     }
 }
 
 function formatSlotResult(
     symbols: [string, string, string],
-    winnings: { percentage: number; message: string },
+    winnings: { payoutType: 'fixed' | 'percentage'; payoutValue: number; message: string },
     jackpotAmount: bigint,
     winnerPayout: bigint,
     hasFee: boolean,
@@ -177,10 +184,19 @@ function formatSlotResult(
         `${winnings.message}\n\n` +
         `💰 Current Jackpot: ${jackpotEth.toFixed(6)} ETH`
 
-    if (winnings.percentage > 0) {
+    if (winnings.payoutType === 'percentage' && winnings.payoutValue > 0) {
+        // Percentage payout (three diamonds)
         const payoutEth = Number(winnerPayout) / 1e18
         result +=
-            `\n\n🎁 You won ${winnings.percentage}% of the jackpot!` +
+            `\n\n🎁 You won ${winnings.payoutValue}% of the jackpot!` +
+            `\n\n💵 Your payout: ${payoutEth.toFixed(6)} ETH`
+        if (hasFee) {
+            result += `\n\n📝 10% fee deducted`
+        }
+    } else if (winnings.payoutType === 'fixed' && winnings.payoutValue > 0) {
+        // Fixed payout (two/three of a kind)
+        const payoutEth = Number(winnerPayout) / 1e18
+        result +=
             `\n\n💵 Your payout: ${payoutEth.toFixed(6)} ETH`
         if (hasFee) {
             result += `\n\n📝 10% fee deducted`
@@ -298,11 +314,11 @@ bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
             '3. I\'ll spin the reels for you!\n\n' +
             `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n` +
             `💵 **Current ETH Price:** $${ethPrice.toFixed(2)}\n\n` +
-            '**Payouts (percentage of jackpot):**\n' +
-            '• Three 💎 = 100% (JACKPOT!)\n' +
-            '• Three of a kind = 20%\n' +
-            '• Two of a kind = 5%\n' +
-            '• No match = 0%\n\n' +
+            '**Payouts:**\n' +
+            '• Three 💎 = 100% of jackpot (JACKPOT!)\n' +
+            '• Three of a kind = 3x entry fee (fixed)\n' +
+            '• Two of a kind = 1x entry fee (fixed)\n' +
+            '• No match = 0\n\n' +
             'Good luck! 🍀',
     )
     console.log('Slot command response sent')
@@ -433,16 +449,22 @@ bot.onTip(async (handler, event) => {
         const symbols = spinSlotMachine()
         const winnings = calculateWinnings(symbols)
 
-        // Calculate payout based on jackpot percentage
+        // Calculate payout based on payout type (fixed or percentage)
         let payoutAmount = BigInt(0)
         let winnerPayout = BigInt(0)
         let hasFee = false
 
-        if (winnings.percentage > 0) {
-            // Calculate percentage of current jackpot
-            const percentageMultiplier = BigInt(winnings.percentage)
+        if (winnings.payoutType === 'percentage' && winnings.payoutValue > 0) {
+            // Percentage payout (three diamonds) - percentage of jackpot
+            const percentageMultiplier = BigInt(winnings.payoutValue)
             payoutAmount = (currentJackpot * percentageMultiplier) / BigInt(100)
+        } else if (winnings.payoutType === 'fixed' && winnings.payoutValue > 0) {
+            // Fixed payout (two/three of a kind) - fixed amount based on entry fee
+            // entryFeeWei is already calculated in the onTip handler scope
+            payoutAmount = entryFeeWei * BigInt(winnings.payoutValue)
+        }
 
+        if (payoutAmount > 0) {
             // Calculate fee (10% of payout goes to deployer, if deployer address is set)
             let feeAmount = BigInt(0)
             winnerPayout = payoutAmount
