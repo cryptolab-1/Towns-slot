@@ -167,38 +167,27 @@ function formatSlotResult(
     const [a, b, c] = symbols
     const jackpotEth = Number(jackpotAmount) / 1e18
     const title = totalGames && totalGames > 1 ? `🎰 GAME ${gameNumber}/${totalGames} 🎰` : '🎰 SLOT MACHINE 🎰'
-
-    // Simple text "card" layout using box-drawing characters
-    const boxWidth = 44
-    const pad = (content: string) => {
-        if (content.length > boxWidth) return content
-        return content.padEnd(boxWidth, ' ')
-    }
-
+    
+    // Compact "card" layout without box borders (avoids emoji width issues)
     const lines: string[] = []
-    lines.push(`╭${'─'.repeat(boxWidth)}╮`)
-    lines.push(`│ ${pad(title)}│`)
-    lines.push(`├${'─'.repeat(boxWidth)}┤`)
-    lines.push(`│ ${pad(`[ ${a} | ${b} | ${c} ]`)}│`)
-    lines.push(`├${'─'.repeat(boxWidth)}┤`)
-    lines.push(`│ ${pad(winnings.message)}│`)
-    lines.push(`├${'─'.repeat(boxWidth)}┤`)
-    lines.push(`│ ${pad(`💰 Current Jackpot: ${jackpotEth.toFixed(6)} ETH`)}│`)
+    lines.push(title)
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━')
+    lines.push(`[ ${a} | ${b} | ${c} ]`)
+    lines.push(winnings.message)
+    lines.push(`💰 Current Jackpot: ${jackpotEth.toFixed(6)} ETH`)
 
     if (winnings.percentage > 0) {
         const payoutEth = Number(winnerPayout) / 1e18
-        lines.push(`│ ${pad(`🎁 You won ${winnings.percentage}% of the jackpot!`)}│`)
-        lines.push(`│ ${pad(`💵 Your payout: ${payoutEth.toFixed(6)} ETH`)}│`)
+        lines.push(`🎁 You won ${winnings.percentage}% of the jackpot!`)
+        lines.push(`💵 Your payout: ${payoutEth.toFixed(6)} ETH`)
         if (hasFee) {
-            lines.push(`│ ${pad('📝 10% fee deducted') }│`)
+            lines.push('📝 10% fee deducted')
         }
     } else {
         if (hasFee) {
-            lines.push(`│ ${pad('📝 10% fee applies on winning spins') }│`)
+            lines.push('📝 10% fee applies on winning spins')
         }
     }
-
-    lines.push(`╰${'─'.repeat(boxWidth)}╯`)
 
     return lines.join('\n')
 }
