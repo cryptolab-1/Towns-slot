@@ -167,29 +167,28 @@ function formatSlotResult(
     const [a, b, c] = symbols
     const jackpotEth = Number(jackpotAmount) / 1e18
     const title = totalGames && totalGames > 1 ? `🎰 GAME ${gameNumber}/${totalGames} 🎰` : '🎰 SLOT MACHINE 🎰'
-    
-    // Compact "card" layout without box borders (avoids emoji width issues)
-    const lines: string[] = []
-    lines.push(title)
-    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━')
-    lines.push(`[ ${a} | ${b} | ${c} ]`)
-    lines.push(winnings.message)
-    lines.push(`💰 Current Jackpot: ${jackpotEth.toFixed(6)} ETH`)
+
+    // Use explicit double newlines so Towns renders proper line breaks
+    let result =
+        `${title}\n\n` +
+        '━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+        `[ ${a} | ${b} | ${c} ]\n\n` +
+        `${winnings.message}\n\n` +
+        `💰 Current Jackpot: ${jackpotEth.toFixed(6)} ETH`
 
     if (winnings.percentage > 0) {
         const payoutEth = Number(winnerPayout) / 1e18
-        lines.push(`🎁 You won ${winnings.percentage}% of the jackpot!`)
-        lines.push(`💵 Your payout: ${payoutEth.toFixed(6)} ETH`)
+        result +=
+            `\n\n🎁 You won ${winnings.percentage}% of the jackpot!` +
+            `\n\n💵 Your payout: ${payoutEth.toFixed(6)} ETH`
         if (hasFee) {
-            lines.push('📝 10% fee deducted')
+            result += `\n\n📝 10% fee deducted`
         }
-    } else {
-        if (hasFee) {
-            lines.push('📝 10% fee applies on winning spins')
-        }
+    } else if (hasFee) {
+        result += `\n\n📝 10% fee applies on winning spins`
     }
 
-    return lines.join('\n')
+    return result
 }
 
 function formatMultiGameSummary(
