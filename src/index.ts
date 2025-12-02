@@ -104,10 +104,11 @@ const DEPLOYER_ADDRESS = process.env.DEPLOYER_ADDRESS as `0x${string}`
 // Don't use a module-level variable to avoid sync issues
 
 // Payout percentages (of jackpot)
+// Very Conservative: Maximum jackpot growth (97.89% growth rate)
 const PAYOUT_PERCENTAGES = {
     threeDiamonds: 100, // 100% of jackpot (JACKPOT!)
-    threeOfAKind: 50, // 50% of jackpot
-    twoOfAKind: 20, // 20% of jackpot
+    threeOfAKind: 20, // 20% of jackpot (reduced from 50% for faster growth)
+    twoOfAKind: 5, // 5% of jackpot (reduced from 20% for faster growth)
     noMatch: 0, // 0% of jackpot
 } as const
 
@@ -299,8 +300,8 @@ bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
             `💵 **Current ETH Price:** $${ethPrice.toFixed(2)}\n\n` +
             '**Payouts (percentage of jackpot):**\n' +
             '• Three 💎 = 100% (JACKPOT!)\n' +
-            '• Three of a kind = 50%\n' +
-            '• Two of a kind = 20%\n' +
+            '• Three of a kind = 20%\n' +
+            '• Two of a kind = 5%\n' +
             '• No match = 0%\n\n' +
             'Good luck! 🍀',
     )
