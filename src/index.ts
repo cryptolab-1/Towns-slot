@@ -372,6 +372,7 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(
             event.channelId || event.spaceId, // Fallback to spaceId if channelId missing
             '⚠️ Error: Missing channel information. Cannot process payout.',
+            event.messageId ? { replyId: event.messageId } : undefined,
         )
         return
     }
@@ -385,6 +386,7 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(
             event.channelId,
             '⚠️ **Error:** Unable to fetch current ETH price. Please try again in a moment.',
+            { replyId: event.messageId },
         )
         return
     }
@@ -423,6 +425,7 @@ bot.onTip(async (handler, event) => {
                 `Examples: $${ENTRY_FEE_DOLLARS.toFixed(2)} (1 game), $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} (4 games)\n` +
                 `💵 Current ETH Price: $${ethPrice.toFixed(2)}\n` +
                 `📊 10% slippage tolerance applied`,
+            { replyId: event.messageId },
         )
         return
     }
@@ -492,15 +495,15 @@ bot.onTip(async (handler, event) => {
         gameResults.push(result)
     }
 
-    // Send all game results
+    // Send all game results in thread (reply to tip message)
     for (const result of gameResults) {
-        await handler.sendMessage(event.channelId, result)
+        await handler.sendMessage(event.channelId, result, { replyId: event.messageId })
     }
 
     // Send total summary if multiple games
     if (numGames > 1) {
         const summary = formatMultiGameSummary(totalWinnings, totalPayout, !!DEPLOYER_ADDRESS, numGames)
-        await handler.sendMessage(event.channelId, summary)
+        await handler.sendMessage(event.channelId, summary, { replyId: event.messageId })
     }
 
     // Automatically send payout when user wins
@@ -563,6 +566,7 @@ bot.onTip(async (handler, event) => {
                 `🎉 **You won ${payoutEth} ETH!**\n\n` +
                     `💰 **Payment sent!**\n\n` +
                     `Transaction: \`${paymentHash}\``,
+                { replyId: event.messageId },
             )
         } catch (error) {
             console.error('❌ Payment failed:', error)
@@ -572,6 +576,7 @@ bot.onTip(async (handler, event) => {
                 `⚠️ **Payout Error**\n\n` +
                     `Unable to send ${payoutEth} ETH.\n\n` +
                     `Please contact support.`,
+                { replyId: event.messageId },
             )
         }
     }
