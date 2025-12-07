@@ -442,15 +442,21 @@ bot.onTip(async (handler, event) => {
         { threadId: event.messageId }
     )
 
-    // Countdown from 10 to 1
-    for (let i = 9; i >= 1; i--) {
-        await new Promise(resolve => setTimeout(resolve, 1000)) // Wait 1 second
-        await handler.sendMessage(
-            event.channelId,
-            `⏱️ Starting in **${i}** seconds...`,
-            { threadId: event.messageId }
-        )
-    }
+    // Wait 5 seconds, then show 5
+    await new Promise(resolve => setTimeout(resolve, 5000))
+    await handler.sendMessage(
+        event.channelId,
+        `⏱️ Starting in **5** seconds...`,
+        { threadId: event.messageId }
+    )
+
+    // Wait 5 more seconds, then show start
+    await new Promise(resolve => setTimeout(resolve, 5000))
+    await handler.sendMessage(
+        event.channelId,
+        `🚀 **Starting now!**`,
+        { threadId: event.messageId }
+    )
 
     // Get initial jackpot from wallet balance
     // We'll track this locally and reduce it after each win
