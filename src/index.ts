@@ -433,6 +433,25 @@ bot.onTip(async (handler, event) => {
     // Calculate actual entry fee used (based on number of games)
     const actualEntryFee = entryFeeWei * BigInt(numGames)
 
+    // Send countdown message to give players time to join the thread
+    await handler.sendMessage(
+        event.channelId,
+        `🎰 **Slot Machine Game Starting!**\n\n` +
+            `👤 Player: <@${event.userId}>\n\n` +
+            `⏱️ Starting in **10** seconds...`,
+        { threadId: event.messageId }
+    )
+
+    // Countdown from 10 to 1
+    for (let i = 9; i >= 1; i--) {
+        await new Promise(resolve => setTimeout(resolve, 1000)) // Wait 1 second
+        await handler.sendMessage(
+            event.channelId,
+            `⏱️ Starting in **${i}** seconds...`,
+            { threadId: event.messageId }
+        )
+    }
+
     // Get initial jackpot from wallet balance
     // We'll track this locally and reduce it after each win
     let jackpot = await getBalance(bot.viem, { address: bot.appAddress })
