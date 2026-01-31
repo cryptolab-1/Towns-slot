@@ -5,7 +5,7 @@ import type { PlainMessage, SlashCommand } from '@towns-protocol/proto'
 const commands = [
     {
         name: 'slot',
-        description: 'Play the slot machine (tip $0.25 per game)',
+        description: 'Play the slot machine (tip $0.25 USDC per game)',
     },
     {
         name: 'jackpot',

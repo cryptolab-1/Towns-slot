@@ -1,106 +1,44 @@
 import { makeTownsBot } from '@towns-protocol/bot'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
-import { getBalance, waitForTransactionReceipt } from 'viem/actions'
-import { formatEther } from 'viem'
+import { readContract, waitForTransactionReceipt } from 'viem/actions'
+import { encodeFunctionData } from 'viem'
 import { execute } from 'viem/experimental/erc7821'
 import commands from './commands'
-// Removed database jackpot - now using wallet balance directly
-
-// Using execute() for both payouts - sends user payout and deployer fee in a single transaction
 
 // Slot machine symbols
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍊', '🍇', '🍉', '⭐', '💎', '🎰'] as const
 
-// Entry fee in dollars per game
-const ENTRY_FEE_DOLLARS = 0.25 // $0.25 per game
+// Entry fee: $0.25 USDC per game (USDC has 6 decimals)
+const ENTRY_FEE_DOLLARS = 0.25
+const ENTRY_FEE_USDC_UNITS = BigInt(250_000) // 0.25 * 1e6
 
-// Fetch current ETH price in USD using multiple fallback APIs
-async function getEthPrice(): Promise<number> {
-    const timeout = 8000 // 8 seconds per API
-    
-    // List of APIs to try in order (with fallbacks)
-    const apis = [
-        {
-            name: 'Coinbase',
-            url: 'https://api.coinbase.com/v2/exchange-rates?currency=ETH',
-            parse: (data: any) => parseFloat(data.data.rates.USD),
-        },
-        {
-            name: 'Kraken',
-            url: 'https://api.kraken.com/0/public/Ticker?pair=ETHUSD',
-            parse: (data: any) => parseFloat(data.result.XETHZUSD.c[0]), // Last trade price
-        },
-        {
-            name: 'CoinGecko',
-            url: 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd',
-            parse: (data: any) => data.ethereum?.usd,
-        },
-    ]
-    
-    // Try each API in order
-    for (const api of apis) {
-        try {
-            console.log(`Fetching ETH price from ${api.name}...`)
-            
-            // Create abort controller for timeout
-            const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), timeout)
-            
-            const response = await fetch(api.url, {
-                signal: controller.signal,
-                headers: {
-                    'Accept': 'application/json',
-                },
-            })
-            
-            clearTimeout(timeoutId)
-            
-            if (!response.ok) {
-                if (response.status === 429) {
-                    console.log(`⚠️ ${api.name} rate limited, trying next API...`)
-                    continue // Try next API
-                }
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-            }
-            
-            const data = await response.json()
-            const price = api.parse(data)
+// USDC on Base (chain 8453)
+const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const
 
-            if (price && price > 0 && isFinite(price)) {
-                console.log(`✅ ETH price fetched from ${api.name}: $${price.toFixed(2)}`)
-                return price
-            } else {
-                throw new Error(`Invalid price data from ${api.name}`)
-            }
-        } catch (error: any) {
-            if (error.name === 'AbortError') {
-                console.log(`⏱️ ${api.name} timeout, trying next API...`)
-            } else {
-                console.log(`⚠️ ${api.name} failed: ${error.message || error}, trying next API...`)
-            }
-            // Continue to next API
-        }
-    }
-    
-    // If all APIs fail, throw error
-    console.error('❌ All ETH price APIs failed')
-    throw new Error('Failed to fetch ETH price from all available APIs')
+const erc20Abi = [
+    { name: 'balanceOf', type: 'function', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }] },
+    { name: 'transfer', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] },
+] as const
+
+async function getUsdcBalance(
+    client: { request: (args: unknown) => Promise<unknown> },
+    address: `0x${string}`,
+): Promise<bigint> {
+    return readContract(client as Parameters<typeof readContract>[0], {
+        address: USDC_ADDRESS as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [address],
+    })
 }
 
-// Calculate entry fee in Wei based on current ETH price
-async function getEntryFeeWei(): Promise<bigint> {
-    const ethPrice = await getEthPrice()
-    const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
-    const entryFeeWei = BigInt(Math.floor(entryFeeEth * 1e18))
-    return entryFeeWei
+function formatUsdc(units: bigint): string {
+    return (Number(units) / 1e6).toFixed(2)
 }
 
 // Deployer wallet address (receives 10% fee on payouts)
 const DEPLOYER_ADDRESS = process.env.DEPLOYER_ADDRESS as `0x${string}`
-
-// Jackpot pool (accumulates all entry fees) - always read from database when needed
-// Don't use a module-level variable to avoid sync issues
 
 // Payout structure: Fixed amounts for small wins, percentage for jackpot
 const PAYOUT_STRUCTURE = {
@@ -172,31 +110,26 @@ function formatSlotResult(
     totalGames?: number,
 ): string {
     const [a, b, c] = symbols
-    const jackpotEth = Number(jackpotAmount) / 1e18
+    const jackpotUsdc = formatUsdc(jackpotAmount)
     const title = totalGames && totalGames > 1 ? `🎰 GAME ${gameNumber}/${totalGames} 🎰` : '🎰 SLOT MACHINE 🎰'
 
-    // Use explicit double newlines so Towns renders proper line breaks
     let result =
         `${title}\n\n` +
         '━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
         `[ ${a} | ${b} | ${c} ]\n\n` +
         `${winnings.message}\n\n` +
-        `💰 Current Jackpot: ${jackpotEth.toFixed(6)} ETH`
+        `💰 Current Jackpot: $${jackpotUsdc} USDC`
 
     if (winnings.payoutType === 'percentage' && winnings.payoutValue > 0) {
-        // Percentage payout (three diamonds)
-        const payoutEth = Number(winnerPayout) / 1e18
         result +=
             `\n\n🎁 You won ${winnings.payoutValue}% of the jackpot!` +
-            `\n\n💵 Your payout: ${payoutEth.toFixed(6)} ETH`
+            `\n\n💵 Your payout: $${formatUsdc(winnerPayout)} USDC`
         if (hasFee) {
             result += `\n\n📝 10% fee deducted`
         }
     } else if (winnings.payoutType === 'fixed' && winnings.payoutValue > 0) {
-        // Fixed payout (two/three of a kind)
-        const payoutEth = Number(winnerPayout) / 1e18
         result +=
-            `\n\n💵 Your payout: ${payoutEth.toFixed(6)} ETH`
+            `\n\n💵 Your payout: $${formatUsdc(winnerPayout)} USDC`
         if (hasFee) {
             result += `\n\n📝 10% fee deducted`
         }
@@ -213,11 +146,9 @@ function formatMultiGameSummary(
     hasFee: boolean,
     numGames: number,
 ): string {
-    const totalWinningsEth = Number(totalWinnings) / 1e18
-    const totalPayoutEth = Number(totalPayout) / 1e18
     let summary = `\n\n🎉 **TOTAL RESULTS (${numGames} games):**\n\n`
-    summary += `💰 **Total Winnings:** ${totalWinningsEth.toFixed(6)} ETH\n`
-    summary += `💵 **Total Payout:** ${totalPayoutEth.toFixed(6)} ETH`
+    summary += `💰 **Total Winnings:** $${formatUsdc(totalWinnings)} USDC\n`
+    summary += `💵 **Total Payout:** $${formatUsdc(totalPayout)} USDC`
     if (hasFee) {
         summary += `\n📝 *10% fee deducted from each win*`
     }
@@ -236,40 +167,13 @@ const bot = await makeTownsBot(process.env.APP_PRIVATE_DATA, process.env.JWT_SEC
     commands,
 })
 
-// Removed sendTipWithRetry wrapper - now using handler.sendTip() directly
-// Removed slotGameMap - now using event.messageId directly (the original tip message)
-
 bot.onSlashCommand('jackpot', async (handler, { channelId }) => {
     console.log('Jackpot command received')
-    
     try {
-        // Get jackpot from actual wallet balance (bot.appAddress)
-        const jackpot = await getBalance(bot.viem, { address: bot.appAddress })
-        const jackpotEth = Number(jackpot) / 1e18
-        
-        // Fetch current ETH price to show USD value
-        let ethPrice: number
-        try {
-            ethPrice = await getEthPrice()
-        } catch (error) {
-            console.error('Failed to fetch ETH price:', error)
-            // Still show jackpot in ETH even if price fetch fails
-            await handler.sendMessage(
-                channelId,
-                `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n\n` +
-                    `⚠️ Unable to fetch USD value at this time.`,
-            )
-            return
-        }
-        
-        const jackpotDollars = jackpotEth * ethPrice
-        
+        const jackpot = await getUsdcBalance(bot.viem, bot.appAddress as `0x${string}`)
         await handler.sendMessage(
             channelId,
-            `💰 **Current Jackpot:**\n\n` +
-                `**${jackpotEth.toFixed(6)} ETH**\n` +
-                `**$${jackpotDollars.toFixed(2)} USD**\n\n` +
-                `💵 Current ETH Price: $${ethPrice.toFixed(2)}`,
+            `💰 **Current Jackpot:** $${formatUsdc(jackpot)} USDC`,
         )
     } catch (error) {
         console.error('Error fetching jackpot:', error)
@@ -282,37 +186,16 @@ bot.onSlashCommand('jackpot', async (handler, { channelId }) => {
 
 bot.onSlashCommand('slot', async (handler, { channelId, userId }) => {
     console.log('Slot command received from user:', userId)
-    
-    // Get jackpot from actual wallet balance (bot.appAddress)
-    const jackpot = await getBalance(bot.viem, { address: bot.appAddress })
-    const jackpotEth = Number(jackpot) / 1e18
-    
-    // Always fetch fresh ETH price (no caching, with retries)
-    let ethPrice: number
-    try {
-        ethPrice = await getEthPrice()
-    } catch (error) {
-        console.error('Failed to fetch ETH price, cannot proceed:', error)
-        await handler.sendMessage(
-            channelId,
-            '⚠️ **Error:** Unable to fetch current ETH price. Please try again in a moment.',
-        )
-        return
-    }
-    
-    const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
-    const entryFeeWei = await getEntryFeeWei()
-    
+    const jackpot = await getUsdcBalance(bot.viem, bot.appAddress as `0x${string}`)
     await handler.sendMessage(
         channelId,
         '🎰 **Welcome to the Slot Machine!** 🎰\n\n' +
-            `To play, send me a tip of **$${ENTRY_FEE_DOLLARS.toFixed(2)}** per game\n\n` +
+            `To play, send me a tip of **$${ENTRY_FEE_DOLLARS.toFixed(2)} USDC** per game\n\n` +
             '**How to play:**\n' +
-            `1. Tip me $${ENTRY_FEE_DOLLARS.toFixed(2)} for 1 game\n` +
+            `1. Tip me $${ENTRY_FEE_DOLLARS.toFixed(2)} USDC for 1 game\n` +
             `2. Tip me more to play multiple games! (e.g., $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} = 4 games)\n` +
             '3. I\'ll spin the reels for you!\n\n' +
-            `💰 **Current Jackpot:** ${jackpotEth.toFixed(6)} ETH\n` +
-            `💵 **Current ETH Price:** $${ethPrice.toFixed(2)}\n\n` +
+            `💰 **Current Jackpot:** $${formatUsdc(jackpot)} USDC\n\n` +
             '**Payouts:**\n' +
             '• Three 💎 = 100% of jackpot (JACKPOT!)\n' +
             '• Three of a kind = 3x entry fee (fixed)\n' +
@@ -369,68 +252,28 @@ bot.onTip(async (handler, event) => {
             messageId: event.messageId,
         })
         await handler.sendMessage(
-            event.channelId || event.spaceId, // Fallback to spaceId if channelId missing
+            event.channelId || event.spaceId,
             '⚠️ Error: Missing channel information. Cannot process payout.',
             event.messageId ? { threadId: event.messageId } : undefined,
         )
         return
     }
 
-    // Get current entry fee in Wei based on current ETH price
-    let ethPrice: number
-    try {
-        ethPrice = await getEthPrice()
-    } catch (error) {
-        console.error('Failed to fetch ETH price for tip validation:', error)
-        await handler.sendMessage(
-            event.channelId,
-            '⚠️ **Error:** Unable to fetch current ETH price. Please try again in a moment.',
-            { threadId: event.messageId },
-        )
-        return
-    }
-    
-    const entryFeeWei = await getEntryFeeWei()
-    const entryFeeEth = ENTRY_FEE_DOLLARS / ethPrice
-    const receivedEth = Number(event.amount) / 1e18
-    const receivedDollars = receivedEth * ethPrice
-
-    // Check if tip amount is valid with 10% slippage tolerance
-    // Calculate expected number of games
-    const expectedGames = Number(event.amount) / Number(entryFeeWei)
-    const numGames = Math.max(1, Math.round(expectedGames))
-    
-    // Calculate expected amount for this number of games
-    const expectedAmount = entryFeeWei * BigInt(numGames)
-    const difference = event.amount > expectedAmount 
-        ? event.amount - expectedAmount 
-        : expectedAmount - event.amount
-    
-    // 10% slippage tolerance per game (scales with number of games)
-    const tolerancePerGame = entryFeeWei / BigInt(10) // 10% tolerance per game
-    const maxTolerance = tolerancePerGame * BigInt(numGames)
-    
-    // Minimum amount check (allow 10% below for 1 game)
-    const minAmount = entryFeeWei - tolerancePerGame
-    
-    // Check if amount is too small or difference is too large
-    if (event.amount < minAmount || difference > maxTolerance) {
+    // Tip must be exact multiple of $0.25 USDC (250_000 units, 6 decimals)
+    if (event.amount < ENTRY_FEE_USDC_UNITS || event.amount % ENTRY_FEE_USDC_UNITS !== BigInt(0)) {
         await handler.sendMessage(
             event.channelId,
             `❌ Invalid tip amount!\n\n` +
-                `You sent: $${receivedDollars.toFixed(2)}\n` +
-                `Required: $${ENTRY_FEE_DOLLARS.toFixed(2)} per game\n\n` +
+                `You sent: $${formatUsdc(event.amount)} USDC\n` +
+                `Required: $${ENTRY_FEE_DOLLARS.toFixed(2)} USDC per game\n\n` +
                 `Tip must be a multiple of $${ENTRY_FEE_DOLLARS.toFixed(2)} to play! 🎰\n` +
-                `Examples: $${ENTRY_FEE_DOLLARS.toFixed(2)} (1 game), $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} (4 games)\n` +
-                `💵 Current ETH Price: $${ethPrice.toFixed(2)}\n` +
-                `📊 10% slippage tolerance applied`,
+                `Examples: $${ENTRY_FEE_DOLLARS.toFixed(2)} (1 game), $${(ENTRY_FEE_DOLLARS * 4).toFixed(2)} (4 games)`,
             { threadId: event.messageId },
         )
         return
     }
-    
-    // Calculate actual entry fee used (based on number of games)
-    const actualEntryFee = entryFeeWei * BigInt(numGames)
+
+    const numGames = Number(event.amount / ENTRY_FEE_USDC_UNITS)
 
     // Send countdown message to give players time to join the thread
     await handler.sendMessage(
@@ -457,9 +300,7 @@ bot.onTip(async (handler, event) => {
         { threadId: event.messageId }
     )
 
-    // Get initial jackpot from wallet balance
-    // We'll track this locally and reduce it after each win
-    let jackpot = await getBalance(bot.viem, { address: bot.appAddress })
+    let jackpot = await getUsdcBalance(bot.viem, bot.appAddress as `0x${string}`)
 
     // Track total winnings and payouts across all games
     let totalWinnings = BigInt(0)
@@ -486,9 +327,7 @@ bot.onTip(async (handler, event) => {
             const percentageMultiplier = BigInt(winnings.payoutValue)
             payoutAmount = (currentJackpot * percentageMultiplier) / BigInt(100)
         } else if (winnings.payoutType === 'fixed' && winnings.payoutValue > 0) {
-            // Fixed payout (two/three of a kind) - fixed amount based on entry fee
-            // entryFeeWei is already calculated in the onTip handler scope
-            payoutAmount = entryFeeWei * BigInt(winnings.payoutValue)
+            payoutAmount = ENTRY_FEE_USDC_UNITS * BigInt(winnings.payoutValue)
         }
 
         if (payoutAmount > 0) {
@@ -530,77 +369,62 @@ bot.onTip(async (handler, event) => {
         await handler.sendMessage(event.channelId, summary, { threadId: event.messageId })
     }
 
-    // Automatically send payout when user wins
+    // Automatically send payout when user wins (USDC)
     if (totalPayout > 0) {
-        const payoutEth = formatEther(totalPayout)
-        
+        const payoutUsdc = formatUsdc(totalPayout)
         try {
-            // Get winner's wallet address
             const { getSmartAccountFromUserId } = await import('@towns-protocol/bot')
-            const winnerWallet = await getSmartAccountFromUserId(bot, { 
-                userId: event.userId 
-            })
-            
+            const winnerWallet = await getSmartAccountFromUserId(bot, { userId: event.userId })
             if (!winnerWallet) {
                 throw new Error('Could not find winner wallet')
             }
-            
-            // Build calls array - include both user payout and deployer fee in one transaction
-            // This avoids nonce conflicts by sending both in a single execute() call
-            const calls: Array<{
-                to: `0x${string}`
-                value: bigint
-                data: `0x${string}`
-            }> = [{
-                to: winnerWallet as `0x${string}`,
-                value: totalPayout,
-                data: '0x' as `0x${string}`
-            }]
-            
-            // Add deployer fee to the same transaction if applicable
+
+            // USDC transfers: user payout + optional deployer fee in one execute()
+            const calls: Array<{ to: `0x${string}`; value: bigint; data: `0x${string}` }> = [
+                {
+                    to: USDC_ADDRESS as `0x${string}`,
+                    value: BigInt(0),
+                    data: encodeFunctionData({
+                        abi: erc20Abi,
+                        functionName: 'transfer',
+                        args: [winnerWallet as `0x${string}`, totalPayout],
+                    }),
+                },
+            ]
             if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
                 calls.push({
-                    to: DEPLOYER_ADDRESS as `0x${string}`,
-                    value: totalDeployerFee,
-                    data: '0x' as `0x${string}`
+                    to: USDC_ADDRESS as `0x${string}`,
+                    value: BigInt(0),
+                    data: encodeFunctionData({
+                        abi: erc20Abi,
+                        functionName: 'transfer',
+                        args: [DEPLOYER_ADDRESS, totalDeployerFee],
+                    }),
                 })
             }
-            
-            // Send payout (and deployer fee) using execute() - single transaction avoids nonce issues
+
             const paymentHash = await execute(bot.viem, {
                 address: bot.appAddress as `0x${string}`,
-                account: bot.viem.account,  // ← This fixes the ERC-7821 error!
-                calls: calls
+                account: bot.viem.account,
+                calls,
             })
-            
-            // Wait for transaction confirmation
             await waitForTransactionReceipt(bot.viem, { hash: paymentHash })
-            
-            console.log(`✅ Payout sent! ${payoutEth} ETH to ${event.userId}`)
-            console.log(`   Transaction: ${paymentHash}`)
-            
-            // Log deployer fee if it was included
+
+            console.log(`✅ Payout sent! $${payoutUsdc} USDC to ${event.userId}`)
             if (DEPLOYER_ADDRESS && totalDeployerFee > 0) {
-                const deployerFeeEth = formatEther(totalDeployerFee)
-                console.log(`✅ Deployer fee sent! ${deployerFeeEth} ETH to ${DEPLOYER_ADDRESS}`)
+                console.log(`✅ Deployer fee sent! $${formatUsdc(totalDeployerFee)} USDC to ${DEPLOYER_ADDRESS}`)
             }
-            
-            // Send success message
+
             await handler.sendMessage(
                 event.channelId,
-                `🎉 **You won ${payoutEth} ETH!**\n\n` +
-                    `💰 **Payment sent!**\n\n` +
-                    `Transaction: \`${paymentHash}\``,
+                `🎉 **You won $${payoutUsdc} USDC!**\n\n💰 **Payment sent!**\n\nTransaction: \`${paymentHash}\``,
                 { threadId: event.messageId },
             )
         } catch (error) {
             console.error('❌ Payment failed:', error)
-            
             await handler.sendMessage(
                 event.channelId,
-                `⚠️ **Payout Error**\n\n` +
-                    `Unable to send ${payoutEth} ETH.\n\n` +
-                    `Please contact support.`,
+                `⚠️ **Payout Error**\n\nUnable to send $${payoutUsdc} USDC.\n\nPlease contact support.`,
                 { threadId: event.messageId },
             )
         }
